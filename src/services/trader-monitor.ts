@@ -35,6 +35,7 @@ export class TraderMonitor extends EventEmitter {
   // Trade deduplication (WebSocket may emit duplicates)
   private recentTrades = new Map<string, number>(); // tradeId → timestamp
   private readonly DEDUP_WINDOW_MS = 60000; // 1 minute
+  private readonly MAX_TRADE_AGE_MS = 5 * 60 * 1000; // 5 minutes - reject older trades
 
   constructor(config: Config, rtdsClient: PolymarketRTDSClient) {
     super();
@@ -176,6 +177,23 @@ export class TraderMonitor extends EventEmitter {
       },
       '📡 Trade received from WebSocket'
     );
+
+    // Filter out old trades (reject historical events)
+    const tradeAgeMs = now - trade.timestamp;
+    if (tradeAgeMs > this.MAX_TRADE_AGE_MS) {
+      const tradeAgeMinutes = Math.round(tradeAgeMs / 60000);
+      const tradeDate = new Date(trade.timestamp).toISOString();
+      logger.info(
+        {
+          tradeHash: tradeId,
+          tradeTimestamp: tradeDate,
+          ageMinutes: tradeAgeMinutes,
+          maxAgeMinutes: Math.round(this.MAX_TRADE_AGE_MS / 60000),
+        },
+        '⏰ Trade too old, ignoring historical event'
+      );
+      return;
+    }
 
     // Check if this trade was recently processed (prevent duplicates)
     const lastSeen = this.recentTrades.get(tradeId);

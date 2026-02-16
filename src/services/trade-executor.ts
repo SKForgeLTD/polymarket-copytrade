@@ -231,28 +231,31 @@ export class TradeExecutor {
       } as TradeExecutionResult;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const isInsufficientBalance =
-        errorMessage.toLowerCase().includes('insufficient balance') ||
-        errorMessage.toLowerCase().includes('insufficient funds');
+      const errorLower = errorMessage.toLowerCase();
 
-      // Log based on error type
+      // Classify error types (expected vs critical)
+      const isInsufficientBalance =
+        errorLower.includes('insufficient balance') || errorLower.includes('insufficient funds');
+      const isGeoblocked =
+        errorLower.includes('region') ||
+        errorLower.includes('geoblock') ||
+        errorLower.includes('403') ||
+        errorLower.includes('forbidden');
+      const isRateLimited = errorLower.includes('rate limit') || errorLower.includes('429');
+
+      // Expected errors - don't record as failures, don't trip circuit breaker
       if (isInsufficientBalance) {
         logger.warn(
-          {
-            error: errorMessage,
-            targetTrade,
-          },
-          '💰 Insufficient balance to execute copy trade (skipping)'
+          { error: errorMessage, targetTrade },
+          '💰 Insufficient balance (expected, skipping)'
         );
-        // Don't record as failure - this is expected during high-frequency trading
+      } else if (isGeoblocked) {
+        logger.warn({ error: errorMessage, targetTrade }, '🌍 Geoblocked (skipping)');
+      } else if (isRateLimited) {
+        logger.warn({ error: errorMessage, targetTrade }, '⏱️ Rate limited (skipping)');
       } else {
-        logger.error(
-          {
-            error: errorMessage,
-            targetTrade,
-          },
-          '❌ Failed to execute copy trade'
-        );
+        // Critical system error - record failure and potentially trip circuit breaker
+        logger.error({ error: errorMessage, targetTrade }, '❌ Critical execution failure');
         this.riskManager.recordFailure();
       }
 
@@ -363,13 +366,12 @@ export class TradeExecutor {
   }
 
   /**
-   * Determine if we should copy this trade based on side and price favorability
+   * Determine if we should copy this trade
+   * Only validation: SELL trades require existing position
    */
   private async shouldCopyTrade(targetTrade: Trade): Promise<{ copy: boolean; reason?: string }> {
-    const side = targetTrade.side;
-
     // SELL trades: Only copy if we have a position to sell
-    if (side === Side.SELL) {
+    if (targetTrade.side === Side.SELL) {
       const userPositions = this.positionManager.getAllUserPositions();
       const existingPosition = userPositions.find(
         (p) => p.tokenId === targetTrade.asset && p.side === Side.BUY
@@ -388,39 +390,11 @@ export class TradeExecutor {
           ourPosition: existingPosition.size.toFixed(2),
           ourCost: existingPosition.avgPrice.toFixed(4),
         },
-        '✅ SELL trade confirmed - we have position to exit'
+        '✅ SELL trade - have position to exit'
       );
-
-      return { copy: true };
     }
 
-    // BUY trades: Check price favorability
-    const targetPositions = this.positionManager.getAllTargetPositions();
-    const targetExistingPosition = targetPositions.find(
-      (p) => p.tokenId === targetTrade.asset && p.side === Side.BUY
-    );
-
-    // If target has no existing position, this is their entry - copy it
-    if (!targetExistingPosition) {
-      logger.info(
-        {
-          tokenId: targetTrade.asset,
-          tradePrice: Number(targetTrade.price).toFixed(4),
-        },
-        '✅ BUY trade - target entering new position'
-      );
-      return { copy: true };
-    }
-
-    // Target is adding to existing position - copy it
-    logger.info(
-      {
-        outcome: targetTrade.outcome,
-        targetPrice: Number(targetTrade.price).toFixed(4),
-        targetSize: targetExistingPosition.size.toFixed(2),
-      },
-      '✅ BUY trade - target adding to position, copying'
-    );
+    // BUY trades always copy (price validation removed - CLOB books unreliable)
     return { copy: true };
   }
 

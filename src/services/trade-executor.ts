@@ -51,18 +51,23 @@ export class TradeExecutor {
       // Smart copying: Check if we should copy this trade based on side
       const shouldCopy = await this.shouldCopyTrade(targetTrade);
       if (!shouldCopy.copy) {
+        // Check if market is closed (don't count as failure)
+        const isMarketClosed = (shouldCopy as any).isMarketClosed === true;
+
         logger.info(
           {
             tradeId: targetTrade.id,
             side: targetTrade.side,
             reason: shouldCopy.reason,
+            marketClosed: isMarketClosed,
           },
-          '⏭️  Skipping trade - not favorable'
+          isMarketClosed ? '⏭️  Skipping trade - market closed' : '⏭️  Skipping trade - not favorable'
         );
 
         const result: TradeExecutionResult = {
           success: false,
           timestamp: startTime,
+          skipped: isMarketClosed, // Flag as skipped (not failed) if market closed
         };
         if (shouldCopy.reason) {
           result.error = shouldCopy.reason;
@@ -77,12 +82,15 @@ export class TradeExecutor {
       // Get best prices for the market
       const prices = await this.clobClient.getBestPrices(targetTrade.asset_id);
       if (!prices) {
-        logger.error({ tokenId: targetTrade.asset_id }, 'Could not get market prices');
-        this.riskManager.recordFailure();
+        logger.warn(
+          { tokenId: targetTrade.asset_id },
+          'No order book available - cannot execute trade (market may be closed)'
+        );
         return {
           success: false,
-          error: 'Could not get market prices',
+          error: 'No order book available',
           timestamp: startTime,
+          skipped: true, // Market closed, not a failure
         };
       }
 
@@ -409,38 +417,49 @@ export class TradeExecutor {
     // Target has existing position - check if current price is favorable
     const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset_id);
     if (!currentPrices || !currentPrices.ask) {
+      // Market likely closed/settled - skip gracefully (not an error)
+      logger.info(
+        { tokenId: targetTrade.asset_id, market: targetTrade.market },
+        'Market has no order book (likely closed/settled) - skipping trade'
+      );
       return {
         copy: false,
-        reason: 'Unable to get current market prices',
+        reason: 'Market closed/settled (no order book)',
       };
     }
 
     const currentPrice = currentPrices.ask; // What we'd pay to buy
     const targetCost = targetExistingPosition.avgPrice;
+    const maxAcceptablePrice = targetCost * 1.01; // Allow up to 1% worse price
 
-    // Only copy if we can buy at same price or better than target's average cost
-    if (currentPrice <= targetCost) {
+    // Copy if we can buy at same price or within 1% of target's average cost
+    if (currentPrice <= maxAcceptablePrice) {
+      const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
       logger.info(
         {
           tokenId: targetTrade.asset_id,
           currentPrice: currentPrice.toFixed(4),
           targetCost: targetCost.toFixed(4),
-          savings: `${(((targetCost - currentPrice) / targetCost) * 100).toFixed(2)}%`,
+          deviation: `${priceDeviation >= 0 ? '+' : ''}${priceDeviation.toFixed(2)}%`,
         },
-        '✅ BUY trade - price favorable (at or below target cost)'
+        priceDeviation <= 0
+          ? '✅ BUY trade - price favorable (at or below target cost)'
+          : '✅ BUY trade - price acceptable (within 1% tolerance)'
       );
       return { copy: true };
     }
 
-    // Price is worse than target's cost - skip
+    // Price is more than 1% worse than target's cost - skip
+    const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
     logger.info(
       {
         tokenId: targetTrade.asset_id,
         currentPrice: currentPrice.toFixed(4),
         targetCost: targetCost.toFixed(4),
-        priceDiff: `${(((currentPrice - targetCost) / targetCost) * 100).toFixed(2)}%`,
+        maxAcceptable: maxAcceptablePrice.toFixed(4),
+        deviation: `+${priceDeviation.toFixed(2)}%`,
       },
-      '⏭️  BUY trade - price unfavorable (above target cost), waiting for better entry'
+      '⏭️  Skipping BUY - price exceeds 1% tolerance'
     );
 
     return {

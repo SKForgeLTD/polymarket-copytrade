@@ -145,6 +145,7 @@ export interface TradeExecutionResult {
   executedPrice?: number;
   error?: string;
   timestamp: number;
+  skipped?: boolean; // True if trade was skipped (not a failure - e.g., market closed)
 }
 
 /**

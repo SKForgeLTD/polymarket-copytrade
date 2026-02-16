@@ -356,23 +356,31 @@ export class PolymarketClobClient {
         return null;
       }
 
+      // Check if this is a 404 error (market closed/settled - expected)
+      const isMarketClosed = (orderBook as any).error && (orderBook as any).status === 404;
+
       // Safely extract bids/asks arrays (may be undefined in malformed responses)
       const bids = Array.isArray(orderBook.bids) ? orderBook.bids : [];
       const asks = Array.isArray(orderBook.asks) ? orderBook.asks : [];
 
-      // Log when bids/asks are missing or invalid
+      // Log when bids/asks are missing or invalid (but not for closed markets)
       if (!Array.isArray(orderBook.bids) || !Array.isArray(orderBook.asks)) {
-        logger.warn(
-          {
-            tokenId,
-            rawResponse: orderBook,
-            hasBids: !!orderBook.bids,
-            hasAsks: !!orderBook.asks,
-            bidsType: typeof orderBook.bids,
-            asksType: typeof orderBook.asks,
-          },
-          'Order book missing bids/asks arrays - likely malformed API response'
-        );
+        if (isMarketClosed) {
+          logger.debug(
+            { tokenId, error: (orderBook as any).error },
+            'Order book not available (market likely closed/settled)'
+          );
+        } else {
+          logger.warn(
+            {
+              tokenId,
+              rawResponse: orderBook,
+              hasBids: !!orderBook.bids,
+              hasAsks: !!orderBook.asks,
+            },
+            'Order book missing bids/asks arrays - unexpected API response'
+          );
+        }
       }
 
       const bestBid = bids.length > 0 && bids[0] ? Number(bids[0].price) : 0;

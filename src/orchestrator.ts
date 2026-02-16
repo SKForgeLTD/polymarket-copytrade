@@ -297,9 +297,21 @@ export class Orchestrator {
           limit: 200,
         });
 
+        // Filter out trades missing required fields AND trades we've already processed
+        const validTrades = userTrades.filter(t =>
+          t.asset_id && t.market && !this.positionManager.isTradeProcessed(t.id)
+        );
+        const skippedCount = userTrades.length - validTrades.length;
+
+        if (skippedCount > 0) {
+          logger.info({ skipped: skippedCount, total: userTrades.length }, 'Filtered incomplete/processed trades');
+        }
+
         logger.info('🔨 Rebuilding user positions...');
-        for (const trade of userTrades) {
+        for (const trade of validTrades) {
           this.positionManager.updatePosition(trade, true);
+          // Mark as processed
+          this.positionManager.markTradeProcessed(trade.id);
         }
       }
 
@@ -320,9 +332,21 @@ export class Orchestrator {
         );
 
         if (targetTrades.length > 0) {
+          // Filter out trades missing required fields AND trades we've already processed
+          const validTrades = targetTrades.filter(t =>
+            t.asset_id && t.market && !this.positionManager.isTradeProcessed(t.id)
+          );
+          const skippedCount = targetTrades.length - validTrades.length;
+
+          if (skippedCount > 0) {
+            logger.info({ skipped: skippedCount, total: targetTrades.length }, 'Filtered incomplete/processed trades');
+          }
+
           logger.info('🔨 Rebuilding target positions...');
-          for (const trade of targetTrades) {
+          for (const trade of validTrades) {
             this.positionManager.updatePosition(trade, false);
+            // Mark as processed so we don't try to copy it again
+            this.positionManager.markTradeProcessed(trade.id);
           }
 
           const targetPositions = this.positionManager.getAllTargetPositions();

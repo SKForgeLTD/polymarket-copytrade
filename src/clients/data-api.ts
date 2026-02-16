@@ -66,18 +66,23 @@ export class DataApiClient {
         params.append('endTime', String(options.endTime));
       }
 
-      // API already returns size/price as strings (verified!)
       const response = await this.client.get<Trade[]>('/trades', { params });
+
+      // Convert timestamps from Unix seconds to milliseconds
+      const trades = response.data.map((trade) => ({
+        ...trade,
+        timestamp: trade.timestamp * 1000,
+      }));
 
       logger.debug(
         {
           userAddress,
-          count: response.data.length,
+          count: trades.length,
         },
         'Retrieved user trades'
       );
 
-      return response.data;
+      return trades;
     } catch (error) {
       logger.error(
         {

@@ -208,7 +208,7 @@ export class PolymarketRTDSClient extends EventEmitter {
         conditionId: payload.conditionId,
         size: String(payload.size), // Convert to string for consistency
         price: String(payload.price),
-        timestamp: payload.timestamp,
+        timestamp: payload.timestamp * 1000, // Convert Unix seconds to milliseconds
         outcome: payload.outcome,
         ...(payload.transactionHash && { transactionHash: payload.transactionHash }),
         ...(payload.title && { title: payload.title }),

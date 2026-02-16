@@ -163,13 +163,20 @@ export class TraderMonitor extends EventEmitter {
 
     const tradeValue = Number(trade.size) * Number(trade.price);
 
+    // Use readable market name
+    const marketName =
+      trade.title ||
+      trade.slug ||
+      `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
+
     // Log ALL incoming trades (before any filtering)
     const tradeId = trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`;
     logger.info(
       {
         tradeHash: tradeId,
         maker: `${trade.proxyWallet.substring(0, 10)}...`,
-        market: trade.conditionId?.substring(0, 30) || 'unknown',
+        market: marketName,
+        outcome: trade.outcome,
         side: trade.side,
         size: Number(trade.size).toFixed(2),
         price: Number(trade.price).toFixed(4),
@@ -186,6 +193,8 @@ export class TraderMonitor extends EventEmitter {
       logger.info(
         {
           tradeHash: tradeId,
+          market: marketName,
+          outcome: trade.outcome,
           tradeTimestamp: tradeDate,
           ageMinutes: tradeAgeMinutes,
           maxAgeMinutes: Math.round(this.MAX_TRADE_AGE_MS / 60000),
@@ -248,12 +257,6 @@ export class TraderMonitor extends EventEmitter {
       );
       return;
     }
-
-    // Use readable market name
-    const marketName =
-      trade.title ||
-      trade.slug ||
-      `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
 
     logger.info(
       {

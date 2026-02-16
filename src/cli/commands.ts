@@ -186,9 +186,10 @@ COMMANDS:
   help       Display this help message
 
 EXAMPLES:
-  pnpm dev start    # Start the bot
-  pnpm dev status   # Check status
-  pnpm dev sync     # Sync positions
+  pnpm dev start           # Start the bot
+  pnpm dev status          # Check status
+  pnpm dev sync            # Sync positions
+  WEB_ENABLED=true pnpm dev start  # Start with web interface
 
 CONFIGURATION:
   Edit .env file to configure:
@@ -196,6 +197,11 @@ CONFIGURATION:
   - Target trader address
   - Copy ratio and position limits
   - Risk management settings
+  - Web interface (WEB_ENABLED, WEB_PORT, WEB_HOST)
+
+WEB INTERFACE:
+  Set WEB_ENABLED=true to enable the monitoring dashboard.
+  Access at http://localhost:3000 (default port).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `);

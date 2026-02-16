@@ -35,6 +35,13 @@ export function createMockConfig(overrides?: Partial<Config>): Config {
       nodeEnv: 'test',
       polygonRpcUrl: 'https://polygon-rpc.com',
     },
+    web: {
+      enabled: false,
+      port: 3000,
+      host: 'localhost',
+      authToken: undefined,
+      rateLimitPerMin: 60,
+    },
   };
 
   return {
@@ -45,6 +52,7 @@ export function createMockConfig(overrides?: Partial<Config>): Config {
     risk: { ...defaultConfig.risk, ...overrides?.risk },
     monitoring: { ...defaultConfig.monitoring, ...overrides?.monitoring },
     system: { ...defaultConfig.system, ...overrides?.system },
+    web: { ...defaultConfig.web, ...overrides?.web },
   };
 }
 

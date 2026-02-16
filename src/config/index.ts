@@ -46,6 +46,15 @@ const configSchema = z.object({
     nodeEnv: z.enum(['development', 'production', 'test']),
     polygonRpcUrl: z.string().url().optional(),
   }),
+
+  // Web Interface
+  web: z.object({
+    enabled: z.boolean().default(false),
+    port: z.number().int().min(1024).max(65535).default(3000),
+    host: z.string().default('localhost'),
+    authToken: z.string().optional(),
+    rateLimitPerMin: z.number().int().positive().default(60),
+  }),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -79,6 +88,13 @@ export function loadConfig(): Config {
         logLevel: process.env.LOG_LEVEL || 'info',
         nodeEnv: process.env.NODE_ENV || 'development',
         polygonRpcUrl: process.env.POLYGON_RPC_URL,
+      },
+      web: {
+        enabled: process.env.WEB_ENABLED === 'true',
+        port: Number(process.env.WEB_PORT) || 3000,
+        host: process.env.WEB_HOST || 'localhost',
+        authToken: process.env.WEB_AUTH_TOKEN,
+        rateLimitPerMin: Number(process.env.WEB_RATE_LIMIT_PER_MIN) || 60,
       },
     });
 

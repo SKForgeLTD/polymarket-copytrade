@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --clean",
+    "build": "tsup src/index.ts --format esm --clean && mkdir -p dist/web && cp -r src/web/static dist/web/ && cp -r src/web/views dist/web/",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
     "lint": "biome check .",
@@ -25,12 +25,16 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/rate-limit": "^10.3.0",
     "@polymarket/clob-client": "^5.2.3",
     "@polymarket/order-utils": "^3.0.1",
     "@polymarket/real-time-data-client": "^1.4.0",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "ethers": "^5.8.0",
+    "fastify": "^5.7.4",
+    "lit-html": "^3.3.2",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.24.1"

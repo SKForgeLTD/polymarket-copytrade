@@ -11,6 +11,7 @@ import { TradeExecutor } from './services/trade-executor.js';
 import { TraderMonitor } from './services/trader-monitor.js';
 import type { Trade } from './types/polymarket.js';
 import { DEFAULT_ENTRY_CONFIG, type SyncAnalysis } from './types/position-entry.js';
+import type { TradeHistoryEntry } from './web/types/api.js';
 
 const logger = createChildLogger({ module: 'Orchestrator' });
 
@@ -28,6 +29,7 @@ export class Orchestrator {
   private tradeExecutor: TradeExecutor;
   private traderMonitor: TraderMonitor;
   private isRunning = false;
+  private webServer: InstanceType<typeof import('./web/server.js').WebServer> | undefined = undefined;
 
   // Trade queue for high-frequency processing
   private tradeQueue: Trade[] = [];
@@ -46,6 +48,10 @@ export class Orchestrator {
     minLatencyMs: Infinity,
     maxLatencyMs: 0,
   };
+
+  // Trade history tracking (circular buffer)
+  private tradeHistory: TradeHistoryEntry[] = [];
+  private readonly MAX_TRADE_HISTORY = 1000;
 
   private constructor(
     config: Config,
@@ -164,6 +170,15 @@ export class Orchestrator {
       // Start monitoring
       await this.traderMonitor.start();
 
+      // Start web server if enabled
+      logger.info({ webEnabled: this.config.web.enabled, webPort: this.config.web.port }, 'Web configuration');
+      if (this.config.web.enabled) {
+        logger.info('Starting web server...');
+        await this.startWebServer();
+      } else {
+        logger.info('Web server disabled in configuration');
+      }
+
       this.isRunning = true;
       logger.info('Copy trading bot started successfully');
     } catch (error) {
@@ -223,6 +238,11 @@ export class Orchestrator {
         } else {
           logger.info('Queue drained successfully');
         }
+      }
+
+      // Stop web server if running
+      if (this.webServer) {
+        await this.stopWebServer();
       }
 
       this.isRunning = false;
@@ -360,6 +380,16 @@ export class Orchestrator {
   }
 
   /**
+   * Add trade to history (circular buffer)
+   */
+  private addToHistory(entry: TradeHistoryEntry): void {
+    this.tradeHistory.unshift(entry); // Add to front
+    if (this.tradeHistory.length > this.MAX_TRADE_HISTORY) {
+      this.tradeHistory.pop(); // Remove oldest
+    }
+  }
+
+  /**
    * Handle detected trade from target trader
    * Adds to queue for async processing (non-blocking)
    */
@@ -413,6 +443,28 @@ export class Orchestrator {
       },
       '📥 Trade queued for processing'
     );
+
+    // Add to trade history
+    const detectedEntry = {
+      id: trade.id,
+      timestamp: Date.now(),
+      type: 'target_detected' as const,
+      market: trade.market,
+      side: trade.side,
+      size: Number(trade.size),
+      price: Number(trade.price),
+      value: Number(trade.size) * Number(trade.price),
+    };
+    this.addToHistory(detectedEntry);
+
+    // Broadcast to SSE clients
+    if (this.webServer) {
+      this.webServer.getSSEManager().broadcast({
+        type: 'trade_detected',
+        timestamp: detectedEntry.timestamp,
+        data: detectedEntry,
+      });
+    }
 
     // Add to queue
     this.tradeQueue.push(trade);
@@ -512,6 +564,32 @@ export class Orchestrator {
           '✅ Copy trade executed'
         );
 
+        // Add to trade history
+        const executedEntry: TradeHistoryEntry = {
+          id: trade.id,
+          timestamp: Date.now(),
+          type: 'copy_executed',
+          market: trade.market,
+          side: trade.side,
+          size: result.executedSize || Number(trade.size),
+          price: result.executedPrice || Number(trade.price),
+          value: (result.executedSize || Number(trade.size)) * (result.executedPrice || Number(trade.price)),
+          latencyMs,
+        };
+        if (result.orderId) {
+          executedEntry.orderId = result.orderId;
+        }
+        this.addToHistory(executedEntry);
+
+        // Broadcast to SSE clients
+        if (this.webServer) {
+          this.webServer.getSSEManager().broadcast({
+            type: 'trade_executed',
+            timestamp: executedEntry.timestamp,
+            data: executedEntry,
+          });
+        }
+
         // Mark trade as processed
         this.positionManager.markTradeProcessed(trade.id);
       } else {
@@ -525,6 +603,32 @@ export class Orchestrator {
           },
           '⚠️ Copy trade failed'
         );
+
+        // Add to trade history
+        const failedEntry: TradeHistoryEntry = {
+          id: trade.id,
+          timestamp: Date.now(),
+          type: 'copy_failed',
+          market: trade.market,
+          side: trade.side,
+          size: Number(trade.size),
+          price: Number(trade.price),
+          value: Number(trade.size) * Number(trade.price),
+          latencyMs,
+        };
+        if (result.error) {
+          failedEntry.error = result.error;
+        }
+        this.addToHistory(failedEntry);
+
+        // Broadcast to SSE clients
+        if (this.webServer) {
+          this.webServer.getSSEManager().broadcast({
+            type: 'trade_failed',
+            timestamp: failedEntry.timestamp,
+            data: failedEntry,
+          });
+        }
       }
     } catch (error) {
       this.metrics.tradesFailed++;
@@ -611,10 +715,45 @@ export class Orchestrator {
     return {
       isRunning: this.isRunning,
       balance,
-      positions: positionSummary,
+      positions: {
+        ...positionSummary,
+        userPositions: this.positionManager.getAllUserPositions(),
+        targetPositions: this.positionManager.getAllTargetPositions(),
+      },
       risk: riskStatus,
       monitoring: monitorStatus,
     };
+  }
+
+  /**
+   * Get performance metrics
+   */
+  getMetrics() {
+    const avgLatencyMs =
+      this.metrics.tradesProcessed > 0
+        ? this.metrics.totalLatencyMs / this.metrics.tradesProcessed
+        : 0;
+
+    return {
+      queueLength: this.tradeQueue.length,
+      processingTrades: this.processingTrades,
+      maxQueueSize: this.maxQueueSize,
+      tradesQueued: this.metrics.tradesQueued,
+      tradesProcessed: this.metrics.tradesProcessed,
+      tradesSkipped: this.metrics.tradesSkipped,
+      tradesFailed: this.metrics.tradesFailed,
+      queueOverflows: this.metrics.queueOverflows,
+      minLatencyMs: this.metrics.minLatencyMs === Infinity ? 0 : this.metrics.minLatencyMs,
+      maxLatencyMs: this.metrics.maxLatencyMs,
+      avgLatencyMs,
+    };
+  }
+
+  /**
+   * Get trade history
+   */
+  getTradeHistory(limit = 50): TradeHistoryEntry[] {
+    return this.tradeHistory.slice(0, limit);
   }
 
   /**
@@ -628,6 +767,46 @@ export class Orchestrator {
       dataApiClient: this.dataApiClient,
       config: this.config,
     };
+  }
+
+  /**
+   * Start web server
+   */
+  private async startWebServer(): Promise<void> {
+    try {
+      const { WebServer } = await import('./web/server.js');
+      const { SSEManager } = await import('./web/sse-manager.js');
+
+      const sseManager = new SSEManager();
+      this.webServer = new WebServer(this.config, this, sseManager);
+      await this.webServer.start();
+
+      logger.info(
+        {
+          url: `http://${this.config.web.host}:${this.config.web.port}`,
+        },
+        '🌐 Web interface started'
+      );
+    } catch (error) {
+      logger.error({ error }, 'Failed to start web server (non-critical, bot will continue)');
+    }
+  }
+
+  /**
+   * Stop web server
+   */
+  private async stopWebServer(): Promise<void> {
+    const webServer = this.webServer;
+    if (!webServer) {
+      return;
+    }
+
+    try {
+      await webServer.stop();
+      this.webServer = undefined;
+    } catch (error) {
+      logger.error({ error }, 'Error stopping web server');
+    }
   }
 
   /**

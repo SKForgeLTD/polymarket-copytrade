@@ -1,0 +1,393 @@
+import { AssetType, ClobClient, OrderType } from '@polymarket/clob-client';
+import { SignatureType } from '@polymarket/order-utils';
+import { Contract, providers, Wallet } from 'ethers';
+import type { Config } from '../config/index.js';
+import { createChildLogger } from '../logger/index.js';
+import type {
+  ClobApiCredentials,
+  ClobCancelParams,
+  ClobOrderParams,
+  OpenOrder,
+} from '../types/clob-api.js';
+import { ERC20_ABI, USDC_DECIMALS, USDC_POLYGON_ADDRESS } from '../types/ethers-extensions.js';
+import type { OrderRequest, OrderResponse } from '../types/polymarket.js';
+
+const logger = createChildLogger({ module: 'ClobClient' });
+
+/**
+ * Wrapper for Polymarket CLOB client with error handling and retry logic
+ */
+export class PolymarketClobClient {
+  private client: ClobClient;
+  private wallet: Wallet;
+  private funderAddress: string;
+
+  private constructor(client: ClobClient, wallet: Wallet, funderAddress: string) {
+    this.client = client;
+    this.wallet = wallet;
+    this.funderAddress = funderAddress;
+  }
+
+  /**
+   * Create and initialize a CLOB client
+   * API credentials are automatically derived from the private key
+   */
+  static async create(config: Config): Promise<PolymarketClobClient> {
+    // Create wallet from private key
+    const privateKey = config.wallet.privateKey.startsWith('0x')
+      ? config.wallet.privateKey
+      : `0x${config.wallet.privateKey}`;
+
+    // Connect wallet to Polygon RPC provider
+    const provider = new providers.JsonRpcProvider(
+      config.system.polygonRpcUrl || 'https://polygon-rpc.com'
+    );
+    const wallet = new Wallet(privateKey, provider);
+
+    logger.info(
+      { address: wallet.address, funder: config.wallet.funderAddress },
+      'Deriving API credentials from private key...'
+    );
+
+    // Create temporary client to derive API keys
+    const tempClient = new ClobClient(
+      'https://clob.polymarket.com',
+      137,
+      wallet,
+      undefined,
+      SignatureType.POLY_PROXY, // Standard Polymarket proxy wallet
+      config.wallet.funderAddress
+    );
+
+    // Derive API credentials from private key
+    let credentials: ClobApiCredentials;
+    try {
+      const derivedCreds = await tempClient.createOrDeriveApiKey();
+
+      // Validate that credentials were actually created
+      if (!derivedCreds || !derivedCreds.key || !derivedCreds.secret || !derivedCreds.passphrase) {
+        throw new Error(
+          'API credential derivation returned invalid or empty credentials. ' +
+            'This may indicate the wallet is not properly set up on Polymarket.'
+        );
+      }
+
+      credentials = {
+        key: derivedCreds.key,
+        secret: derivedCreds.secret,
+        passphrase: derivedCreds.passphrase,
+      };
+
+      logger.info(
+        {
+          address: wallet.address,
+          apiKeyPrefix: `${derivedCreds.key.substring(0, 8)}...`,
+        },
+        'API credentials derived successfully'
+      );
+    } catch (error) {
+      logger.error(
+        {
+          address: wallet.address,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Failed to derive API credentials'
+      );
+      throw new Error(
+        `Failed to derive API credentials: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    // Initialize ClobClient with wallet, credentials, and funder address
+    // SignatureType: EOA, POLY_PROXY, POLY_GNOSIS_SAFE
+    const client = new ClobClient(
+      'https://clob.polymarket.com',
+      137, // Polygon mainnet
+      wallet,
+      credentials,
+      SignatureType.POLY_PROXY, // Standard Polymarket proxy wallet
+      config.wallet.funderAddress // funder address for orders
+    );
+
+    // Verify credentials work by testing API access
+    try {
+      logger.info({ address: wallet.address }, 'Verifying API credentials...');
+      await client.getOpenOrders();
+      logger.info({ address: wallet.address }, 'API credentials verified successfully');
+    } catch (error) {
+      logger.error(
+        {
+          address: wallet.address,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'API credential verification failed'
+      );
+      throw new Error(
+        `API credentials verification failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          `Please ensure your wallet (${wallet.address}) is properly set up on Polymarket and has deposit permissions.`
+      );
+    }
+
+    logger.info({ address: wallet.address }, 'CLOB client initialized');
+
+    return new PolymarketClobClient(client, wallet, config.wallet.funderAddress);
+  }
+
+  /**
+   * Get wallet address
+   */
+  getAddress(): string {
+    return this.wallet.address;
+  }
+
+  /**
+   * Create a market order
+   */
+  async createOrder(order: OrderRequest, maxRetries = 3): Promise<OrderResponse> {
+    const { tokenID, price, size, side } = order;
+
+    logger.info(
+      {
+        tokenID,
+        price,
+        size,
+        side,
+        orderType: 'GTC',
+      },
+      'Creating order'
+    );
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const params: ClobOrderParams = {
+          tokenID,
+          price,
+          side,
+          size,
+        };
+
+        // Create and post the order in one call
+        // This returns the orderID directly
+        const orderId = await this.client.createAndPostOrder(params, {}, OrderType.GTC);
+
+        logger.info(
+          {
+            orderID: orderId,
+            status: 'LIVE',
+          },
+          'Order created successfully'
+        );
+
+        const response: OrderResponse = {
+          orderID: orderId,
+          status: 'LIVE',
+        };
+
+        return response;
+      } catch (error) {
+        logger.error(
+          {
+            attempt,
+            maxRetries,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Failed to create order'
+        );
+
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Failed to create order after ${maxRetries} attempts: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+
+        // Exponential backoff
+        const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    throw new Error('Unexpected error in createOrder');
+  }
+
+  /**
+   * Cancel an order
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    logger.info({ orderId }, 'Cancelling order');
+
+    try {
+      const params: ClobCancelParams = { orderID: orderId };
+      await this.client.cancelOrder(params);
+      logger.info({ orderId }, 'Order cancelled successfully');
+    } catch (error) {
+      logger.error(
+        {
+          orderId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Failed to cancel order'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's open orders
+   */
+  async getOpenOrders(): Promise<OpenOrder[]> {
+    try {
+      const orders = await this.client.getOpenOrders();
+      return orders;
+    } catch (error) {
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Failed to get open orders'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get order by ID
+   */
+  async getOrder(orderId: string): Promise<OpenOrder> {
+    try {
+      const order = await this.client.getOrder(orderId);
+      return order;
+    } catch (error) {
+      logger.error(
+        {
+          orderId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Failed to get order'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's USDC balance on Polymarket
+   *
+   * First tries CLOB API balance endpoint, falls back to blockchain query
+   */
+  async getBalance(): Promise<number> {
+    try {
+      // Try 1: Query via getBalanceAllowance (signing wallet)
+      const balanceResponse = await this.client.getBalanceAllowance({
+        asset_type: AssetType.COLLATERAL, // Query USDC balance
+      });
+      const signerBalance = Number(balanceResponse.balance) / 10 ** USDC_DECIMALS;
+
+      logger.info(
+        {
+          method: 'getBalanceAllowance',
+          signerAddress: this.wallet.address,
+          signerBalance,
+          balanceRaw: balanceResponse.balance,
+          allowanceRaw: balanceResponse.allowance,
+        },
+        'Retrieved balance from CLOB API'
+      );
+
+      // If signing wallet has balance, return it
+      if (signerBalance > 0) {
+        return signerBalance;
+      }
+
+      // Try 2: Query USDC balance directly from Polygon for funder address
+      logger.info(
+        { funderAddress: this.funderAddress },
+        'Signer balance is 0, checking funder address on Polygon...'
+      );
+
+      const provider = this.wallet.provider;
+      if (!provider) {
+        throw new Error('Wallet provider not available');
+      }
+
+      const usdcContract = new Contract(USDC_POLYGON_ADDRESS, ERC20_ABI, provider);
+      const funderBalanceRaw = await usdcContract.balanceOf(this.funderAddress);
+      const funderBalance = Number(funderBalanceRaw.toString()) / 10 ** USDC_DECIMALS;
+
+      logger.info(
+        {
+          method: 'blockchain',
+          funderAddress: this.funderAddress,
+          funderBalance,
+          balanceRaw: funderBalanceRaw.toString(),
+        },
+        'Retrieved balance from Polygon blockchain'
+      );
+
+      return funderBalance;
+    } catch (error) {
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          signerAddress: this.wallet.address,
+          funderAddress: this.funderAddress,
+        },
+        'Failed to get balance'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get market best bid/ask prices
+   */
+  async getBestPrices(tokenId: string): Promise<{ bid: number; ask: number } | null> {
+    try {
+      const orderBook = await this.client.getOrderBook(tokenId);
+
+      // Validate orderBook structure (can be malformed during geoblocking or API errors)
+      if (!orderBook || typeof orderBook !== 'object') {
+        logger.warn(
+          {
+            tokenId,
+            rawResponse: orderBook,
+            responseType: typeof orderBook,
+          },
+          'Invalid order book response - not an object'
+        );
+        return null;
+      }
+
+      // Safely extract bids/asks arrays (may be undefined in malformed responses)
+      const bids = Array.isArray(orderBook.bids) ? orderBook.bids : [];
+      const asks = Array.isArray(orderBook.asks) ? orderBook.asks : [];
+
+      // Log when bids/asks are missing or invalid
+      if (!Array.isArray(orderBook.bids) || !Array.isArray(orderBook.asks)) {
+        logger.warn(
+          {
+            tokenId,
+            rawResponse: orderBook,
+            hasBids: !!orderBook.bids,
+            hasAsks: !!orderBook.asks,
+            bidsType: typeof orderBook.bids,
+            asksType: typeof orderBook.asks,
+          },
+          'Order book missing bids/asks arrays - likely malformed API response'
+        );
+      }
+
+      const bestBid = bids.length > 0 && bids[0] ? Number(bids[0].price) : 0;
+      const bestAsk = asks.length > 0 && asks[0] ? Number(asks[0].price) : 0;
+
+      return { bid: bestBid, ask: bestAsk };
+    } catch (error) {
+      logger.error(
+        {
+          tokenId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Failed to get best prices'
+      );
+      return null;
+    }
+  }
+}

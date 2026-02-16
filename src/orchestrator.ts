@@ -539,6 +539,11 @@ export class Orchestrator {
             data: failedEntry,
           });
         }
+
+        // Mark trade as processed even on failure (prevent reprocessing)
+        this.positionManager.markTradeProcessed(
+          trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`
+        );
       }
     } catch (error) {
       this.metrics.tradesFailed++;
@@ -550,6 +555,11 @@ export class Orchestrator {
           latencyMs: Date.now() - startTime,
         },
         'Error processing single trade'
+      );
+
+      // Mark trade as processed even on error (prevent reprocessing)
+      this.positionManager.markTradeProcessed(
+        trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`
       );
     }
   }

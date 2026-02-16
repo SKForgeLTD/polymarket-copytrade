@@ -348,8 +348,8 @@ export class PositionManager {
       const dir = path.dirname(this.stateFilePath);
       await fs.mkdir(dir, { recursive: true });
 
-      // Atomic write: write to temp file, then rename
-      const tempFilePath = `${this.stateFilePath}.tmp`;
+      // Atomic write: write to temp file with unique name (prevents concurrent save collisions), then rename
+      const tempFilePath = `${this.stateFilePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 9)}`;
       const backupFilePath = `${this.stateFilePath}.backup`;
 
       // Write to temp file

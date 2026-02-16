@@ -88,7 +88,11 @@ export class PolymarketClobClient {
       );
 
       try {
-        const derivedCreds = await tempClient.createOrDeriveApiKey();
+        // Get current nonce for proper credential derivation
+        const nonce = await provider.getTransactionCount(wallet.address);
+        logger.debug({ nonce, address: wallet.address }, 'Using nonce for API credential derivation');
+
+        const derivedCreds = await tempClient.createOrDeriveApiKey(nonce);
 
         if (!derivedCreds || !derivedCreds.key || !derivedCreds.secret || !derivedCreds.passphrase) {
           throw new Error(
@@ -133,6 +137,17 @@ export class PolymarketClobClient {
       credentials,
       SignatureType.POLY_PROXY, // Standard Polymarket proxy wallet
       config.wallet.funderAddress // funder address for orders
+    );
+
+    // Log configuration for debugging
+    logger.debug(
+      {
+        l1Wallet: wallet.address,
+        funderAddress: config.wallet.funderAddress,
+        signatureType: 'POLY_PROXY',
+        chainId: 137,
+      },
+      'CLOB Client configuration'
     );
 
     // Verify credentials work by testing API access
@@ -213,6 +228,21 @@ export class PolymarketClobClient {
           side,
           size,
         };
+
+        // Debug logging for signature validation issues
+        logger.debug(
+          {
+            tokenID,
+            tokenIDType: typeof tokenID,
+            tokenIDLength: tokenID.length,
+            maker: this.funderAddress,
+            signer: this.wallet.address,
+            price,
+            size,
+            side,
+          },
+          'Creating order with parameters'
+        );
 
         // Create and post the order in one call
         // This returns the orderID directly (or error object if failed)

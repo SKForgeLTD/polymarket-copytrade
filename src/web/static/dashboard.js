@@ -12,8 +12,8 @@ const state = {
   loading: true,
   connected: false,
   lastUpdate: null,
-  websocketConnected: false,
   uptime: null,
+  nextPollCountdown: 0,
 };
 
 // EventSource for real-time updates
@@ -148,12 +148,38 @@ async function init() {
   // Render initial state
   renderApp();
 
+  // Update poll countdown every second
+  setInterval(() => {
+    updatePollCountdown();
+    renderApp();
+  }, 1000);
+
   // Auto-refresh every 30 seconds as backup
   setInterval(() => {
     if (!state.connected) {
       fetchStatus();
     }
   }, 30000);
+}
+
+/**
+ * Update countdown to next poll
+ */
+function updatePollCountdown() {
+  if (!state.status || !state.status.monitoring) return;
+
+  const { monitoring } = state.status;
+  if (!monitoring.pollingActive) {
+    state.nextPollCountdown = 0;
+    return;
+  }
+
+  const lastPollTime = new Date(monitoring.lastPollTime).getTime();
+  const nextPollTime = lastPollTime + (monitoring.pollIntervalSeconds * 1000);
+  const now = Date.now();
+  const secondsUntilNextPoll = Math.max(0, Math.ceil((nextPollTime - now) / 1000));
+
+  state.nextPollCountdown = secondsUntilNextPoll;
 }
 
 /**
@@ -252,14 +278,6 @@ function connectSSE() {
     console.log('Circuit breaker event:', data);
     SoundManager.circuitBreaker();
     fetchStatus(); // Refresh full status
-  });
-
-  eventSource.addEventListener('connection_status', (event) => {
-    const data = JSON.parse(event.data);
-    console.log('WebSocket connection status:', data.connected);
-    state.websocketConnected = data.connected;
-    SoundManager.connectionChange(data.connected);
-    renderApp();
   });
 
   eventSource.addEventListener('uptime', (event) => {
@@ -529,6 +547,7 @@ function renderRiskCard() {
  */
 function renderMonitoringCard() {
   const { monitoring } = state.status;
+  const nextPollCountdown = state.nextPollCountdown || 0;
 
   return html`
     <div class="card">
@@ -545,19 +564,25 @@ function renderMonitoringCard() {
           </span>
         </div>
         <div class="metric-row">
-          <span class="metric-label">WebSocket</span>
+          <span class="metric-label">Polling</span>
           <span class="metric-value">
             ${
-              monitoring.websocketConnected
-                ? html`<span class="badge badge-success">CONN</span>`
-                : html`<span class="badge badge-warning">DISC</span>`
+              monitoring.pollingActive
+                ? html`<span class="badge badge-success">Every ${monitoring.pollIntervalSeconds}s</span>`
+                : html`<span class="badge badge-warning">INACTIVE</span>`
             }
           </span>
         </div>
         <div class="metric-row">
-          <span class="metric-label">Uptime</span>
-          <span class="metric-value value-dim" style="font-size: 11px;">
-            ${state.uptime || 'calculating...'}
+          <span class="metric-label">Next Poll</span>
+          <span class="metric-value ${nextPollCountdown <= 3 ? 'value-warning' : ''}">
+            ${nextPollCountdown}s
+          </span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Last Poll</span>
+          <span class="metric-value value-dim" style="font-size: 10px;">
+            ${new Date(monitoring.lastPollTime).toLocaleTimeString()}
           </span>
         </div>
         <div class="metric-row">

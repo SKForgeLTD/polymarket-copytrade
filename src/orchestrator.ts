@@ -1,14 +1,15 @@
 import { PolymarketClobClient } from './clients/clob-client.js';
-import { PolymarketRTDSClient } from './clients/rtds-client.js';
+import { DataApiClient } from './clients/data-api.js';
 import type { Config } from './config/index.js';
 import { createChildLogger } from './logger/index.js';
 import { PositionCalculator } from './services/position-calculator.js';
 import { PositionManager } from './services/position-manager.js';
 import { RiskManager } from './services/risk-manager.js';
 import { TradeExecutor } from './services/trade-executor.js';
-import { type ConnectionStatus, TraderMonitor } from './services/trader-monitor.js';
+import { TraderMonitor } from './services/trader-monitor.js';
 import type { Trade } from './types/polymarket.js';
 import type { TradeHistoryEntry } from './web/types/api.js';
+import { getTradeLogObject } from './utils/format.js';
 
 const logger = createChildLogger({ module: 'Orchestrator' });
 
@@ -75,7 +76,7 @@ export class Orchestrator {
   static async create(config: Config): Promise<Orchestrator> {
     // Initialize clients (async)
     const clobClient = await PolymarketClobClient.create(config);
-    const rtdsClient = new PolymarketRTDSClient(config.trading.targetTraderAddress);
+    const dataApiClient = new DataApiClient();
 
     // Initialize services
     const positionManager = new PositionManager();
@@ -88,8 +89,8 @@ export class Orchestrator {
       positionCalculator
     );
 
-    // Initialize monitor (WebSocket-only)
-    const traderMonitor = new TraderMonitor(config, rtdsClient);
+    // Initialize monitor (HTTP polling)
+    const traderMonitor = new TraderMonitor(config, dataApiClient);
 
     return new Orchestrator(
       config,
@@ -147,12 +148,7 @@ export class Orchestrator {
         );
       });
 
-      // Set up connection status handler
-      this.traderMonitor.on('connectionStatus', (status: ConnectionStatus) => {
-        this.handleConnectionStatusChange(status);
-      });
-
-      // Start monitoring
+      // Start monitoring via HTTP polling
       await this.traderMonitor.start();
 
       // Start web server if enabled
@@ -317,10 +313,7 @@ export class Orchestrator {
     logger.info(
       {
         tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
-        market: trade.conditionId,
-        side: trade.side,
-        size: trade.size,
-        price: trade.price,
+        ...getTradeLogObject(trade),
         queueLength: this.tradeQueue.length,
         processing: this.processingTrades,
       },
@@ -598,31 +591,6 @@ export class Orchestrator {
         },
         'Failed to display status'
       );
-    }
-  }
-
-  /**
-   * Handle WebSocket connection status change
-   */
-  private handleConnectionStatusChange(status: ConnectionStatus): void {
-    logger.info(
-      {
-        connected: status.connected,
-        reason: status.reason,
-      },
-      status.connected ? '✅ WebSocket connected' : '❌ WebSocket disconnected'
-    );
-
-    // Broadcast to SSE clients
-    if (this.webServer) {
-      this.webServer.getSSEManager().broadcast({
-        type: 'connection_status',
-        timestamp: status.timestamp,
-        data: {
-          connected: status.connected,
-          reason: status.reason,
-        },
-      });
     }
   }
 

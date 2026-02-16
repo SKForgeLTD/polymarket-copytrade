@@ -1,19 +1,11 @@
 import { EventEmitter } from 'node:events';
-import type { PolymarketRTDSClient } from '../clients/rtds-client.js';
+import type { DataApiClient } from '../clients/data-api.js';
 import type { Config } from '../config/index.js';
 import { createChildLogger } from '../logger/index.js';
 import type { Trade } from '../types/polymarket.js';
+import { getTradeLogObject } from '../utils/format.js';
 
 const logger = createChildLogger({ module: 'TraderMonitor' });
-
-/**
- * Connection status for WebSocket
- */
-export interface ConnectionStatus {
-  connected: boolean;
-  timestamp: number;
-  reason?: string;
-}
 
 /**
  * Events emitted by TraderMonitor
@@ -21,30 +13,32 @@ export interface ConnectionStatus {
 interface TraderMonitorEvents {
   trade: (trade: Trade) => void;
   error: (error: Error) => void;
-  connectionStatus: (status: ConnectionStatus) => void;
 }
 
 /**
- * Monitor target trader for new trades via WebSocket only
+ * Monitor target trader for new trades via HTTP polling
  */
 export class TraderMonitor extends EventEmitter {
   private config: Config;
-  private rtdsClient: PolymarketRTDSClient;
+  private dataApiClient: DataApiClient;
   private isMonitoring = false;
-  private lastSeenTimestamp = Date.now();
-  // Trade deduplication (WebSocket may emit duplicates)
-  private recentTrades = new Map<string, number>(); // tradeId → timestamp
-  private readonly DEDUP_WINDOW_MS = 60000; // 1 minute
-  private readonly MAX_TRADE_AGE_MS = 5 * 60 * 1000; // 5 minutes - reject older trades
+  private pollingInterval: NodeJS.Timeout | null = null;
+  private lastPollTimestamp: number;
+  private readonly POLL_INTERVAL_MS = 5000; // 5 seconds = ~12/min = 720/hour (70% of 1000/hour limit)
+  // Trade deduplication
+  private recentTrades = new Set<string>(); // Set of transaction hashes
+  private readonly MAX_DEDUP_CACHE_SIZE = 1000; // Limit cache size
 
-  constructor(config: Config, rtdsClient: PolymarketRTDSClient) {
+  constructor(config: Config, dataApiClient: DataApiClient) {
     super();
     this.config = config;
-    this.rtdsClient = rtdsClient;
+    this.dataApiClient = dataApiClient;
+    // Start polling from 1 minute ago to catch recent trades on first poll
+    this.lastPollTimestamp = Math.floor(Date.now() / 1000) - 60;
   }
 
   /**
-   * Start monitoring target trader
+   * Start monitoring target trader via HTTP polling
    */
   async start(): Promise<void> {
     if (this.isMonitoring) {
@@ -56,12 +50,25 @@ export class TraderMonitor extends EventEmitter {
     logger.info(
       {
         targetAddress: this.config.trading.targetTraderAddress,
+        pollIntervalSeconds: this.POLL_INTERVAL_MS / 1000,
       },
-      'Starting WebSocket monitoring'
+      '🔄 Starting HTTP polling for target trader'
     );
 
-    // Set up WebSocket monitoring
-    await this.setupWebSocketMonitoring();
+    // Do initial poll immediately
+    await this.pollForTrades();
+
+    // Set up polling interval
+    this.pollingInterval = setInterval(() => {
+      this.pollForTrades().catch((error) => {
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Error during polling'
+        );
+      });
+    }, this.POLL_INTERVAL_MS);
   }
 
   /**
@@ -73,82 +80,62 @@ export class TraderMonitor extends EventEmitter {
     }
 
     this.isMonitoring = false;
-    logger.info('Stopping WebSocket monitoring');
+    logger.info('Stopping HTTP polling');
 
-    // Disconnect WebSocket
-    this.rtdsClient.disconnect();
+    // Clear polling interval
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
   }
 
   /**
-   * Set up WebSocket monitoring
+   * Poll for new trades from target trader
    */
-  private async setupWebSocketMonitoring(): Promise<void> {
-    // Handle trade events
-    this.rtdsClient.on('trade', (trade) => {
-      this.handleTrade(trade);
-    });
-
-    // Handle connection events
-    this.rtdsClient.on('connected', () => {
-      logger.info('WebSocket connected');
-      this.emit('connectionStatus', {
-        connected: true,
-        timestamp: Date.now(),
-      });
-    });
-
-    this.rtdsClient.on('disconnected', () => {
-      logger.warn('WebSocket disconnected');
-      this.emit('connectionStatus', {
-        connected: false,
-        timestamp: Date.now(),
-        reason: 'disconnected',
-      });
-    });
-
-    this.rtdsClient.on('error', (error) => {
-      logger.error(
-        {
-          error: error.message,
-        },
-        'WebSocket error'
-      );
-      this.emit('error', error);
-      this.emit('connectionStatus', {
-        connected: false,
-        timestamp: Date.now(),
-        reason: error.message,
-      });
-    });
-
-    // Connect to WebSocket
+  private async pollForTrades(): Promise<void> {
     try {
-      await this.rtdsClient.connect();
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+
+      // Fetch trades since last poll
+      const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
+        startTime: this.lastPollTimestamp,
+        limit: 100,
+      });
+
+      logger.debug(
+        {
+          tradesFound: trades.length,
+          startTime: new Date(this.lastPollTimestamp * 1000).toISOString(),
+        },
+        'Poll completed'
+      );
+
+      // Process trades in chronological order (oldest first)
+      const sortedTrades = trades.sort((a, b) => a.timestamp - b.timestamp);
+
+      for (const trade of sortedTrades) {
+        this.handleTrade(trade);
+      }
+
+      // Update last poll timestamp for next poll
+      this.lastPollTimestamp = currentTimestamp;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(
         {
-          error: errorMessage,
+          error: error instanceof Error ? error.message : String(error),
         },
-        'Failed to connect WebSocket'
+        'Failed to poll for trades'
       );
-      this.emit('connectionStatus', {
-        connected: false,
-        timestamp: Date.now(),
-        reason: errorMessage,
-      });
       throw error;
     }
   }
 
   /**
-   * Handle detected trade
+   * Handle detected trade from polling
    */
   private handleTrade(trade: Trade): void {
-    const now = Date.now();
-
-    // Validate required fields early
-    if (!trade.conditionId || !trade.asset || !trade.proxyWallet) {
+    // Validate required fields
+    if (!trade.conditionId || !trade.asset || !trade.proxyWallet || !trade.transactionHash) {
       logger.warn(
         {
           tradeHash: trade.transactionHash,
@@ -161,114 +148,38 @@ export class TraderMonitor extends EventEmitter {
       return;
     }
 
-    const tradeValue = Number(trade.size) * Number(trade.price);
-
-    // Use readable market name
-    const marketName =
-      trade.title ||
-      trade.slug ||
-      `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
-
-    // Log ALL incoming trades (before any filtering)
-    const tradeId = trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`;
-    logger.info(
-      {
-        tradeHash: tradeId,
-        maker: `${trade.proxyWallet.substring(0, 10)}...`,
-        market: marketName,
-        outcome: trade.outcome,
-        side: trade.side,
-        size: Number(trade.size).toFixed(2),
-        price: Number(trade.price).toFixed(4),
-        value: `$${tradeValue.toFixed(2)}`,
-      },
-      '📡 Trade received from WebSocket'
-    );
-
-    // Filter out old trades (reject historical events)
-    const tradeAgeMs = now - trade.timestamp;
-    if (tradeAgeMs > this.MAX_TRADE_AGE_MS) {
-      const tradeAgeMinutes = Math.round(tradeAgeMs / 60000);
-      const tradeDate = new Date(trade.timestamp).toISOString();
-      logger.info(
-        {
-          tradeHash: tradeId,
-          market: marketName,
-          outcome: trade.outcome,
-          tradeTimestamp: tradeDate,
-          ageMinutes: tradeAgeMinutes,
-          maxAgeMinutes: Math.round(this.MAX_TRADE_AGE_MS / 60000),
-        },
-        '⏰ Trade too old, ignoring historical event'
-      );
-      return;
+    // Deduplicate by transaction hash
+    if (this.recentTrades.has(trade.transactionHash)) {
+      return; // Already processed
     }
 
-    // Check if this trade was recently processed (prevent duplicates)
-    const lastSeen = this.recentTrades.get(tradeId);
-    if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
-      logger.info(
-        {
-          tradeHash: tradeId,
-          timeSinceLastSeen: `${Math.round((now - lastSeen) / 1000)}s`,
-        },
-        '🔄 Duplicate trade filtered (already seen)'
-      );
-      return;
-    }
+    // Mark as processed
+    this.recentTrades.add(trade.transactionHash);
 
-    // Mark trade as recently seen
-    this.recentTrades.set(tradeId, now);
-
-    // Cleanup old entries to prevent unbounded growth
-    for (const [id, ts] of this.recentTrades.entries()) {
-      if (now - ts > this.DEDUP_WINDOW_MS) {
-        this.recentTrades.delete(id);
+    // Cleanup cache if too large (remove oldest entries)
+    if (this.recentTrades.size > this.MAX_DEDUP_CACHE_SIZE) {
+      const toRemove = Array.from(this.recentTrades).slice(0, 100);
+      for (const hash of toRemove) {
+        this.recentTrades.delete(hash);
       }
     }
 
-    // Update last seen timestamp
-    if (trade.timestamp > this.lastSeenTimestamp) {
-      this.lastSeenTimestamp = trade.timestamp;
-    }
-
-    // Filter by maker address (target trader)
-    if (trade.proxyWallet.toLowerCase() !== this.config.trading.targetTraderAddress.toLowerCase()) {
-      logger.info(
-        {
-          tradeHash: tradeId,
-          maker: `${trade.proxyWallet.substring(0, 10)}...`,
-          target: `${this.config.trading.targetTraderAddress.substring(0, 10)}...`,
-        },
-        '❌ Trade from different address (not our target)'
-      );
-      return;
-    }
+    const tradeValue = Number(trade.size) * Number(trade.price);
 
     // Filter by minimum trade size
     if (tradeValue < this.config.trading.minTradeSizeUsd) {
-      logger.info(
+      logger.debug(
         {
-          tradeHash: tradeId,
+          tradeHash: trade.transactionHash,
           value: `$${tradeValue.toFixed(2)}`,
           minRequired: `$${this.config.trading.minTradeSizeUsd}`,
         },
-        '⚠️ Trade below minimum threshold, skipping'
+        'Trade below minimum threshold, skipping'
       );
       return;
     }
 
-    logger.info(
-      {
-        market: marketName,
-        outcome: trade.outcome,
-        side: trade.side,
-        size: Number(trade.size).toFixed(2),
-        price: Number(trade.price).toFixed(4),
-        value: `$${tradeValue.toFixed(2)}`,
-      },
-      '✅ Target trade detected'
-    );
+    logger.info(getTradeLogObject(trade), '✅ Target trade detected');
 
     // Emit trade event
     this.emit('trade', trade);
@@ -280,9 +191,10 @@ export class TraderMonitor extends EventEmitter {
   getStatus() {
     return {
       isMonitoring: this.isMonitoring,
-      websocketConnected: this.rtdsClient.isConnected(),
-      lastSeenTimestamp: this.lastSeenTimestamp,
+      pollingActive: !!this.pollingInterval,
+      lastPollTime: new Date(this.lastPollTimestamp * 1000).toISOString(),
       targetAddress: this.config.trading.targetTraderAddress,
+      pollIntervalSeconds: this.POLL_INTERVAL_MS / 1000,
     };
   }
 

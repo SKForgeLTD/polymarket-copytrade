@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createChildLogger } from '../logger/index.js';
 import type { Position, Trade } from '../types/polymarket.js';
+import { getReadableMarketName } from '../utils/format.js';
 
 const logger = createChildLogger({ module: 'PositionManager' });
 
@@ -78,7 +79,8 @@ export class PositionManager {
       logger.info(
         {
           isUserTrade,
-          tokenId: newPosition.tokenId,
+          market: getReadableMarketName(trade),
+          outcome: trade.outcome,
           side: newPosition.side,
           size: newPosition.size,
           price: newPosition.avgPrice,
@@ -112,7 +114,8 @@ export class PositionManager {
             logger.warn(
               {
                 isUserTrade,
-                tokenId: existingPosition.tokenId,
+                market: getReadableMarketName(trade),
+                outcome: trade.outcome,
                 originalSize: existingPosition.size,
                 tradeSize,
                 overshoot: Math.abs(newSize),
@@ -123,7 +126,8 @@ export class PositionManager {
             logger.info(
               {
                 isUserTrade,
-                tokenId: existingPosition.tokenId,
+                market: getReadableMarketName(trade),
+                outcome: trade.outcome,
               },
               'Closed position'
             );
@@ -140,7 +144,8 @@ export class PositionManager {
       logger.info(
         {
           isUserTrade,
-          tokenId: existingPosition.tokenId,
+          market: getReadableMarketName(trade),
+          outcome: trade.outcome,
           side: trade.side,
           newSize: existingPosition.size,
           avgPrice: existingPosition.avgPrice,

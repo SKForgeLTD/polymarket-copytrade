@@ -77,8 +77,9 @@ export class CLI {
       console.log('MONITORING:');
       console.log(`  Active: ${status.monitoring.isMonitoring ? '✅' : '❌'}`);
       console.log(
-        `  WebSocket: ${status.monitoring.websocketConnected ? '✅ Connected' : '⚠️  Disconnected'}`
+        `  Polling: ${status.monitoring.pollingActive ? `✅ Active (every ${status.monitoring.pollIntervalSeconds}s)` : '⚠️  Inactive'}`
       );
+      console.log(`  Last Poll: ${status.monitoring.lastPollTime}`);
       console.log(`  Target Trader: ${status.monitoring.targetAddress}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     } catch (error) {

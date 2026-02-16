@@ -41,7 +41,9 @@ export interface BotStatusResponse {
   };
   monitoring: {
     isActive: boolean;
-    websocketConnected: boolean;
+    pollingActive: boolean;
+    pollIntervalSeconds: number;
+    lastPollTime: string;
     targetAddress: string;
   };
   performance: {

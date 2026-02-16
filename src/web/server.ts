@@ -228,7 +228,9 @@ export class WebServer {
       },
       monitoring: {
         isActive: status.monitoring.isMonitoring,
-        websocketConnected: status.monitoring.websocketConnected,
+        pollingActive: status.monitoring.pollingActive,
+        pollIntervalSeconds: status.monitoring.pollIntervalSeconds,
+        lastPollTime: status.monitoring.lastPollTime,
         targetAddress: status.monitoring.targetAddress,
       },
       performance: {

@@ -7,6 +7,7 @@ import {
 } from '@polymarket/real-time-data-client';
 import { createChildLogger } from '../logger/index.js';
 import type { Trade } from '../types/polymarket.js';
+import { getTradeLogObject } from '../utils/format.js';
 
 const logger = createChildLogger({ module: 'RTDSClient' });
 
@@ -167,6 +168,18 @@ export class PolymarketRTDSClient extends EventEmitter {
    */
   private handleMessage(message: Message): void {
     try {
+      // Log ALL messages to debug subscription
+      logger.debug(
+        {
+          topic: message.topic,
+          type: message.type,
+          messageTimestamp: message.timestamp,
+          messageDate: new Date(message.timestamp).toISOString(),
+          hasPayload: !!message.payload,
+        },
+        '📨 WebSocket message received'
+      );
+
       // Only process trade messages from activity topic
       if (message.topic !== 'activity' || message.type !== 'trades') {
         return;
@@ -217,22 +230,7 @@ export class PolymarketRTDSClient extends EventEmitter {
         ...(payload.eventSlug && { eventSlug: payload.eventSlug }),
       };
 
-      // Log with readable market name
-      const marketName =
-        trade.title ||
-        trade.slug ||
-        `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
-
-      logger.info(
-        {
-          market: marketName,
-          outcome: trade.outcome,
-          side: trade.side,
-          size: trade.size,
-          price: trade.price,
-        },
-        '📥 Trade detected'
-      );
+      logger.info(getTradeLogObject(trade), '📥 Trade detected');
 
       this.emit('trade', trade);
     } catch (error) {

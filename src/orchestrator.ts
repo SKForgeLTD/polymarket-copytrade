@@ -144,13 +144,8 @@ export class Orchestrator {
       // Display initial status (before sync)
       await this.displayStatus();
 
-      // Reconcile positions on startup (load target positions only, don't clear existing)
-      await this.reconcilePositions({
-        clearFirst: false,
-        includeUser: false,
-        includeTarget: true,
-        analyze: false,
-      });
+      // Skip reconciliation - focus on live trades only
+      logger.info('Ready to monitor live trades (reconciliation disabled)');
 
       // Set up trade event handler
       this.traderMonitor.on('trade', (trade) => {

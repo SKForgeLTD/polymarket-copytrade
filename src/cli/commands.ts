@@ -97,74 +97,15 @@ export class CLI {
    * Sync positions from blockchain/API
    */
   async sync(): Promise<void> {
-    logger.info('🔄 Syncing positions from Polymarket API...');
-
-    try {
-      const { positionManager } = this.orchestrator.getServices();
-
-      // Use shared reconciliation method
-      const { userTrades, targetTrades, analysis } = await this.orchestrator.reconcilePositions({
-        clearFirst: true,
-        includeUser: true,
-        includeTarget: true,
-        analyze: true,
-      });
-
-      // Display summary
-      if (!analysis) {
-        logger.error('Failed to analyze opportunities');
-        return;
-      }
-
-      const summary = positionManager.getSummary();
-      logger.info(
-        {
-          userTradesProcessed: userTrades.length,
-          targetTradesProcessed: targetTrades.length,
-          userOpenPositions: summary.userPositionCount,
-          targetOpenPositions: summary.targetPositionCount,
-          userTotalValue: summary.userTotalValue.toFixed(2),
-          targetTotalValue: summary.targetTotalValue.toFixed(2),
-          opportunities: analysis.opportunities.length,
-          potentialSavings: analysis.totalPotentialSavings.toFixed(2),
-        },
-        '✅ Positions synced successfully'
-      );
-
-      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📊 SYNC RESULTS');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(`User Trades Processed: ${userTrades.length}`);
-      console.log(`Target Trades Processed: ${targetTrades.length}`);
-      console.log(`User Open Positions: ${summary.userPositionCount}`);
-      console.log(`Target Open Positions: ${summary.targetPositionCount}`);
-      console.log(`User Total Value: $${summary.userTotalValue.toFixed(2)}`);
-      console.log(`Target Total Value: $${summary.targetTotalValue.toFixed(2)}`);
-
-      if (analysis.positionsToClose.length > 0) {
-        console.log(`\n⚠️  Positions to Close: ${analysis.positionsToClose.length}`);
-      }
-      if (analysis.positionsToOpen.length > 0) {
-        console.log(`📍 Positions to Open: ${analysis.positionsToOpen.length}`);
-      }
-
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-      // Display entry opportunities
-      if (analysis.opportunities.length > 0) {
-        const { positionEntryAnalyzer } = this.orchestrator.getServices();
-        const opportunitiesSummary = positionEntryAnalyzer.formatOpportunitiesSummary(analysis);
-        console.log(opportunitiesSummary);
-      }
-    } catch (error) {
-      logger.error(
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-        '❌ Failed to sync positions'
-      );
-      process.exit(1);
-    }
+    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logger.info('⚠️  Sync command disabled');
+    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logger.info('');
+    logger.info('The bot now focuses purely on live incoming trades.');
+    logger.info('Position reconciliation has been removed for simplicity.');
+    logger.info('');
+    logger.info('To monitor trades, use: pnpm dev start');
+    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   /**

@@ -23,6 +23,7 @@ export class TraderMonitor extends EventEmitter {
   private dataApiClient: DataApiClient;
   private isMonitoring = false;
   private pollingInterval: NodeJS.Timeout | null = null;
+  private lastPollTimestamp = 0; // Track actual poll time for UI
   private readonly POLL_INTERVAL_MS = 5000; // 5 seconds = ~12/min = 720/hour (70% of 1000/hour limit)
   private readonly POLL_WINDOW_SECONDS = 7; // Fetch trades from last 7 seconds
   // Trade deduplication
@@ -92,6 +93,9 @@ export class TraderMonitor extends EventEmitter {
    */
   private async pollForTrades(): Promise<void> {
     try {
+      // Update last poll timestamp for UI
+      this.lastPollTimestamp = Date.now();
+
       // Fetch recent trades (API doesn't support time filtering for user queries)
       const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
         limit: 20, // Reduced since we filter client-side
@@ -240,7 +244,9 @@ export class TraderMonitor extends EventEmitter {
     return {
       isMonitoring: this.isMonitoring,
       pollingActive: !!this.pollingInterval,
-      lastPollTime: new Date().toISOString(),
+      lastPollTime: this.lastPollTimestamp > 0
+        ? new Date(this.lastPollTimestamp).toISOString()
+        : new Date().toISOString(),
       targetAddress: this.config.trading.targetTraderAddress,
       pollIntervalSeconds: this.POLL_INTERVAL_MS / 1000,
     };

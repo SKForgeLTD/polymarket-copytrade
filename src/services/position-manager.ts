@@ -229,58 +229,78 @@ export class PositionManager {
    * Load state from file
    */
   private async loadState(): Promise<void> {
-    try {
-      const data = await fs.readFile(this.stateFilePath, 'utf-8');
+    // Try loading from main file, then backup if corrupted
+    const filesToTry = [
+      { path: this.stateFilePath, label: 'main' },
+      { path: `${this.stateFilePath}.backup`, label: 'backup' },
+    ];
 
-      // Add validation before parsing
-      let state: {
-        userPositions?: unknown;
-        targetPositions?: unknown;
-        processedTradeIds?: unknown;
-      };
+    for (const { path: filePath, label } of filesToTry) {
       try {
-        state = JSON.parse(data);
-      } catch (parseError) {
-        logger.error(
-          {
-            error: parseError instanceof Error ? parseError.message : String(parseError),
-            fileLength: data.length,
-            preview: data.substring(0, 100),
-          },
-          'Failed to parse state file - corrupted JSON. Starting fresh.'
-        );
-        // Don't throw - start fresh instead
+        const data = await fs.readFile(filePath, 'utf-8');
+
+        // Try to parse JSON
+        let state: {
+          userPositions?: unknown;
+          targetPositions?: unknown;
+          processedTradeIds?: unknown;
+        };
+        try {
+          state = JSON.parse(data);
+        } catch (parseError) {
+          logger.error(
+            {
+              file: label,
+              error: parseError instanceof Error ? parseError.message : String(parseError),
+              fileLength: data.length,
+              preview: data.substring(0, 100),
+            },
+            `Failed to parse ${label} state file - corrupted JSON`
+          );
+          continue; // Try next file
+        }
+
+        // Successfully parsed - restore state
+        await this.restoreState(state);
+        logger.info({ file: label }, `Loaded state from ${label} file`);
         return;
+      } catch (error) {
+        // File doesn't exist or can't be read - try next
+        continue;
       }
-
-      // Restore user positions
-      if (state.userPositions) {
-        this.userPositions = new Map(Object.entries(state.userPositions));
-      }
-
-      // Restore target positions
-      if (state.targetPositions) {
-        this.targetPositions = new Map(Object.entries(state.targetPositions));
-      }
-
-      // Restore processed trade IDs
-      if (state.processedTradeIds && Array.isArray(state.processedTradeIds)) {
-        this.processedTradeIds = new Set(state.processedTradeIds);
-      }
-
-      logger.info(
-        {
-          userPositions: this.userPositions.size,
-          targetPositions: this.targetPositions.size,
-        },
-        'Loaded persisted state'
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-      // File doesn't exist yet, that's okay
     }
+
+    // No valid state file found
+    logger.warn('No valid state file found. Starting fresh.');
+  }
+
+  private async restoreState(state: {
+    userPositions?: unknown;
+    targetPositions?: unknown;
+    processedTradeIds?: unknown;
+  }): Promise<void> {
+    // Restore user positions
+    if (state.userPositions) {
+      this.userPositions = new Map(Object.entries(state.userPositions));
+    }
+
+    // Restore target positions
+    if (state.targetPositions) {
+      this.targetPositions = new Map(Object.entries(state.targetPositions));
+    }
+
+    // Restore processed trade IDs
+    if (state.processedTradeIds && Array.isArray(state.processedTradeIds)) {
+      this.processedTradeIds = new Set(state.processedTradeIds);
+    }
+
+    logger.info(
+      {
+        userPositions: this.userPositions.size,
+        targetPositions: this.targetPositions.size,
+      },
+      'Restored persisted state'
+    );
   }
 
   /**
@@ -327,10 +347,25 @@ export class PositionManager {
       const dir = path.dirname(this.stateFilePath);
       await fs.mkdir(dir, { recursive: true });
 
-      // Write state file
-      await fs.writeFile(this.stateFilePath, JSON.stringify(state, null, 2), 'utf-8');
+      // Atomic write: write to temp file, then rename
+      const tempFilePath = `${this.stateFilePath}.tmp`;
+      const backupFilePath = `${this.stateFilePath}.backup`;
 
-      logger.debug('Saved state to file');
+      // Write to temp file
+      await fs.writeFile(tempFilePath, JSON.stringify(state, null, 2), 'utf-8');
+
+      // Backup existing file if it exists
+      try {
+        await fs.access(this.stateFilePath);
+        await fs.copyFile(this.stateFilePath, backupFilePath);
+      } catch {
+        // File doesn't exist yet, no backup needed
+      }
+
+      // Atomic rename (replaces existing file)
+      await fs.rename(tempFilePath, this.stateFilePath);
+
+      logger.debug('Saved state to file (atomic write)');
     } catch (error) {
       logger.error(
         {

@@ -92,28 +92,48 @@ export class TraderMonitor extends EventEmitter {
    */
   private async pollForTrades(): Promise<void> {
     try {
-      const currentTimestamp = Math.floor(Date.now() / 1000);
-      const startTimestamp = currentTimestamp - this.POLL_WINDOW_SECONDS;
-
-      // Fetch trades from last 7 seconds
+      // Fetch recent trades (API doesn't support time filtering for user queries)
       const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
-        startTime: startTimestamp,
-        limit: 100,
+        limit: 20, // Reduced since we filter client-side
       });
 
-      logger.debug(
-        {
-          tradesFound: trades.length,
-          windowSeconds: this.POLL_WINDOW_SECONDS,
-        },
-        'Poll completed'
-      );
+      // Log trade ages for debugging
+      if (trades.length > 0) {
+        const now = Date.now();
+        const tradeAges = trades.map(t => Math.floor((now - t.timestamp) / 1000));
+        logger.debug(
+          {
+            tradesFound: trades.length,
+            windowSeconds: this.POLL_WINDOW_SECONDS,
+            oldestTradeAge: `${Math.max(...tradeAges)}s ago`,
+            newestTradeAge: `${Math.min(...tradeAges)}s ago`,
+          },
+          'Poll completed'
+        );
+      } else {
+        logger.debug(
+          {
+            tradesFound: 0,
+            windowSeconds: this.POLL_WINDOW_SECONDS,
+          },
+          'Poll completed - no trades'
+        );
+      }
+
+      // Filter trades to only those within our polling window (ignore old trades from API)
+      const now = Date.now();
+      const windowMs = this.POLL_WINDOW_SECONDS * 1000;
+      const recentTrades = trades.filter(trade => {
+        const tradeAge = now - trade.timestamp;
+        return tradeAge <= windowMs;
+      });
 
       // Process trades in chronological order (oldest first)
-      const sortedTrades = trades.sort((a, b) => a.timestamp - b.timestamp);
+      const sortedTrades = recentTrades.sort((a, b) => a.timestamp - b.timestamp);
 
       let newTradesCount = 0;
       let filteredCount = 0;
+      let oldTradesCount = trades.length - recentTrades.length;
 
       for (const trade of sortedTrades) {
         const isNew = this.handleTrade(trade);
@@ -122,6 +142,17 @@ export class TraderMonitor extends EventEmitter {
         } else {
           filteredCount++;
         }
+      }
+
+      // Log if API returned trades older than our window (debug level - this is expected)
+      if (oldTradesCount > 0) {
+        logger.debug(
+          {
+            oldTrades: oldTradesCount,
+            recentTrades: recentTrades.length,
+          },
+          'Filtered out old trades'
+        );
       }
 
       // Log filtered trades summary if any were skipped

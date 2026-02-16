@@ -81,16 +81,13 @@ export class DataApiClient {
 
       const params = new URLSearchParams({
         user: userAddress.toLowerCase(),
-        limit: String(options.limit || 100),
+        limit: String(options.limit || 20), // Default to 20 (Data API ignores time filters for user queries)
         offset: String(options.offset || 0),
       });
 
-      if (options.startTime) {
-        params.append('startTime', String(options.startTime));
-      }
-      if (options.endTime) {
-        params.append('endTime', String(options.endTime));
-      }
+      // Note: Data API does not support time filtering (start/end) for user queries
+      // Time filtering only works for market-based queries
+      // We filter by time client-side instead
 
       const response = await this.client.get<Trade[]>('/trades', { params });
 

@@ -445,7 +445,7 @@ export class TradeExecutor {
     const targetCost = targetExistingPosition.avgPrice;
     const maxAcceptablePrice = targetCost * 1.01; // Allow up to 1% worse price
 
-    // If no asks available, place order at target's cost (will sit in book)
+    // If no asks available, skip (don't place limit orders)
     if (currentPrices.ask === 0) {
       logger.info(
         {
@@ -453,9 +453,9 @@ export class TradeExecutor {
           targetCost: targetCost.toFixed(4),
           hasBids: currentPrices.bid > 0,
         },
-        '⚠️ No ask orders available - will place bid at target cost (may not fill immediately)'
+        '⏭️  Skipping BUY - no ask orders available (no limit orders)'
       );
-      return { copy: true };
+      return { copy: false, reason: 'No ask orders available' };
     }
 
     // Copy if we can buy at same price or within 1% of target's average cost

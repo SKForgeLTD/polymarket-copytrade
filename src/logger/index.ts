@@ -22,7 +22,6 @@ export function createLogger() {
         translateTime: 'HH:MM:ss.l',
         ignore: 'pid,hostname,env',
         singleLine: true,
-        messageFormat: '{levelLabel} [{module}] {msg}',
       },
     };
   }

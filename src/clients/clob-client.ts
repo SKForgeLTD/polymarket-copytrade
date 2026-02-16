@@ -423,11 +423,25 @@ export class PolymarketClobClient {
       const bestAsk = asks.length > 0 && asks[0] ? Number(asks[0].price) : 0;
 
       return { bid: bestBid, ask: bestAsk };
-    } catch (error) {
+    } catch (error: any) {
+      // Handle 404 as market closed/settled (expected)
+      if (error.response?.status === 404 || error.status === 404) {
+        logger.debug(
+          {
+            tokenId,
+            error: error.response?.data?.error || error.message,
+          },
+          'Order book not available (market closed/settled)'
+        );
+        return null;
+      }
+
+      // Log unexpected errors
       logger.error(
         {
           tokenId,
-          error: error instanceof Error ? error.message : String(error),
+          status: error.response?.status || error.status,
+          error: error.response?.data?.error || error.message || String(error),
         },
         'Failed to get best prices'
       );

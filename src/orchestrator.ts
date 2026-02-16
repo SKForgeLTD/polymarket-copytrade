@@ -8,8 +8,8 @@ import { RiskManager } from './services/risk-manager.js';
 import { TradeExecutor } from './services/trade-executor.js';
 import { TraderMonitor } from './services/trader-monitor.js';
 import type { Trade } from './types/polymarket.js';
-import type { TradeHistoryEntry } from './web/types/api.js';
 import { getTradeLogObject } from './utils/format.js';
+import type { TradeHistoryEntry } from './web/types/api.js';
 
 const logger = createChildLogger({ module: 'Orchestrator' });
 

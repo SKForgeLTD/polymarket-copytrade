@@ -51,7 +51,7 @@ export class DataApiClient {
     // Chain this call after the previous one
     const currentPromise = this.lastApiCallPromise.then(async () => {
       // Wait for cooldown period
-      await new Promise(resolve => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
+      await new Promise((resolve) => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
       logger.debug({ cooldownMs: this.API_CALL_COOLDOWN_MS }, 'Rate limit cooldown completed');
     });
 
@@ -63,8 +63,16 @@ export class DataApiClient {
   }
 
   /**
-   * Get trades for a specific user
-   * API returns trades with fields: proxyWallet, side, asset, conditionId, size (number), price (number), timestamp
+   * Get trades for a specific user using /activity endpoint (real-time, ~10-15s lag)
+   * Docs: https://docs.polymarket.com/developers/misc-endpoints/data-api-activity
+   *
+   * Supports:
+   * - Time filtering (start/end timestamps)
+   * - Type filtering (we use type=TRADE)
+   * - Up to 500 results per request
+   * - Rich metadata (title, slug, icon, outcome, pseudonym, etc.)
+   *
+   * Much faster than /trades endpoint (~15s lag vs 7+ min lag)
    */
   async getUserTrades(
     userAddress: string,
@@ -81,18 +89,30 @@ export class DataApiClient {
 
       const params = new URLSearchParams({
         user: userAddress.toLowerCase(),
-        limit: String(options.limit || 20), // Default to 20 (Data API ignores time filters for user queries)
+        limit: String(options.limit || 20),
         offset: String(options.offset || 0),
+        type: 'TRADE', // Server-side filter for trades only (vs SPLIT, MERGE, REDEEM, etc.)
       });
 
-      // Note: Data API does not support time filtering (start/end) for user queries
-      // Time filtering only works for market-based queries
-      // We filter by time client-side instead
+      // Add time filtering if provided (Unix seconds)
+      if (options.startTime) {
+        params.append('start', String(Math.floor(options.startTime / 1000)));
+      }
+      if (options.endTime) {
+        params.append('end', String(Math.floor(options.endTime / 1000)));
+      }
 
-      const response = await this.client.get<Trade[]>('/trades', { params });
+      // Note: /activity endpoint is much more real-time than /trades (~15s lag vs 7+ min lag)
+      // Supports time filtering (start/end), type filtering, and up to 500 results per request
+      // Sorted by timestamp DESC (newest first) by default
+
+      const response = await this.client.get<Trade[]>('/activity', { params });
+
+      // No need to filter for TRADE type - we filter server-side via type=TRADE parameter
+      const activities = response.data;
 
       // Convert timestamps from Unix seconds to milliseconds
-      const trades = response.data.map((trade) => ({
+      const trades = activities.map((trade) => ({
         ...trade,
         timestamp: trade.timestamp * 1000,
       }));
@@ -101,8 +121,9 @@ export class DataApiClient {
         {
           userAddress,
           count: trades.length,
+          totalActivities: response.data.length,
         },
-        'Retrieved user trades'
+        'Retrieved user trades from activity endpoint'
       );
 
       return trades;

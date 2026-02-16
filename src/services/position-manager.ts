@@ -264,10 +264,7 @@ export class PositionManager {
         await this.restoreState(state);
         logger.info({ file: label }, `Loaded state from ${label} file`);
         return;
-      } catch (error) {
-        // File doesn't exist or can't be read - try next
-        continue;
-      }
+      } catch (error) {}
     }
 
     // No valid state file found

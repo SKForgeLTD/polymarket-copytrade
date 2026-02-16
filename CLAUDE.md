@@ -8,6 +8,20 @@ A production-grade automated copy trading bot for Polymarket prediction markets.
 
 **Tech Stack**: TypeScript (strict mode), Node.js v22+, pnpm, ethers v5, Biome, Vitest
 
+## Working Principles
+
+**CRITICAL: Do NOT make assumptions about APIs, endpoints, or behavior without verification.**
+
+When working with external APIs or libraries:
+- ✅ **Verify endpoints and parameters** - Check actual API responses, not just documentation
+- ✅ **Test assumptions** - Use curl, WebFetch, or direct testing before implementing
+- ✅ **Question documentation** - Official docs may be outdated or incomplete
+- ✅ **Check actual behavior** - Real-world API behavior > theoretical behavior
+- ❌ **Never assume** API lag, endpoint behavior, or data formats without evidence
+- ❌ **Never guess** which endpoint is "better" - test both and compare
+
+**Example**: If the UI uses a different endpoint than documentation suggests, investigate both endpoints to understand why.
+
 ## Code Quality Standards
 
 **CRITICAL: This codebase must meet production-grade, banking-grade, quant-grade, HFT-firm grade quality standards.**

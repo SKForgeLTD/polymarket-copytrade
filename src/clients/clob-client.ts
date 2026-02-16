@@ -157,7 +157,7 @@ export class PolymarketClobClient {
     // Chain this call after the previous one
     const currentPromise = this.lastApiCallPromise.then(async () => {
       // Wait for cooldown period
-      await new Promise(resolve => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
+      await new Promise((resolve) => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
       logger.debug({ cooldownMs: this.API_CALL_COOLDOWN_MS }, 'Rate limit cooldown completed');
     });
 

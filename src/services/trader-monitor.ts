@@ -98,14 +98,17 @@ export class TraderMonitor extends EventEmitter {
 
       // Fetch recent trades (API doesn't support time filtering for user queries)
       // Increased limit to handle extremely high-frequency traders
-      const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
-        limit: 200, // Fetch 200 trades to ensure we catch recent activity even from very active traders
-      });
+      const trades = await this.dataApiClient.getUserTrades(
+        this.config.trading.targetTraderAddress,
+        {
+          limit: 200, // Fetch 200 trades to ensure we catch recent activity even from very active traders
+        }
+      );
 
       // Log trade ages for debugging
       if (trades.length > 0) {
         const now = Date.now();
-        const tradeAges = trades.map(t => Math.floor((now - t.timestamp) / 1000));
+        const tradeAges = trades.map((t) => Math.floor((now - t.timestamp) / 1000));
         logger.debug(
           {
             tradesFound: trades.length,
@@ -130,7 +133,7 @@ export class TraderMonitor extends EventEmitter {
       const windowMs = this.POLL_WINDOW_SECONDS * 1000;
       const cutoffTime = new Date(now - windowMs).toISOString();
 
-      const recentTrades = trades.filter(trade => {
+      const recentTrades = trades.filter((trade) => {
         const tradeAge = now - trade.timestamp;
         return tradeAge <= windowMs;
       });
@@ -143,7 +146,7 @@ export class TraderMonitor extends EventEmitter {
             recentTrades: 0,
             windowSeconds: this.POLL_WINDOW_SECONDS,
             cutoffTime,
-            newestTradeTime: new Date(Math.max(...trades.map(t => t.timestamp))).toISOString(),
+            newestTradeTime: new Date(Math.max(...trades.map((t) => t.timestamp))).toISOString(),
           },
           'All fetched trades are outside polling window - possible API lag or very active trader'
         );
@@ -154,7 +157,7 @@ export class TraderMonitor extends EventEmitter {
 
       let newTradesCount = 0;
       let filteredCount = 0;
-      let oldTradesCount = trades.length - recentTrades.length;
+      const oldTradesCount = trades.length - recentTrades.length;
 
       for (const trade of sortedTrades) {
         const isNew = this.handleTrade(trade);
@@ -261,9 +264,10 @@ export class TraderMonitor extends EventEmitter {
     return {
       isMonitoring: this.isMonitoring,
       pollingActive: !!this.pollingInterval,
-      lastPollTime: this.lastPollTimestamp > 0
-        ? new Date(this.lastPollTimestamp).toISOString()
-        : new Date().toISOString(),
+      lastPollTime:
+        this.lastPollTimestamp > 0
+          ? new Date(this.lastPollTimestamp).toISOString()
+          : new Date().toISOString(),
       targetAddress: this.config.trading.targetTraderAddress,
       pollIntervalSeconds: this.POLL_INTERVAL_MS / 1000,
     };

@@ -175,7 +175,7 @@ function updatePollCountdown() {
   }
 
   const lastPollTime = new Date(monitoring.lastPollTime).getTime();
-  const nextPollTime = lastPollTime + (monitoring.pollIntervalSeconds * 1000);
+  const nextPollTime = lastPollTime + monitoring.pollIntervalSeconds * 1000;
   const now = Date.now();
   const secondsUntilNextPoll = Math.max(0, Math.ceil((nextPollTime - now) / 1000));
 

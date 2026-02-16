@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CLI } from './cli/commands.js';
 import { logger } from './logger/index.js';
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const packageJson = JSON.parse(
-  readFileSync(join(__dirname, '../package.json'), 'utf-8')
-);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8'));
 const VERSION = packageJson.version;
 
 /**

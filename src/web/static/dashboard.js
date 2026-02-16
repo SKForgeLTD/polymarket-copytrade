@@ -672,7 +672,12 @@ function renderLogEntry(trade) {
       icon = '❓';
   }
 
-  const marketShort = trade.market ? trade.market.substring(0, 40) + '...' : 'Unknown';
+  // Use readable market name (title > slug > short hash)
+  const marketName = trade.title || trade.slug ||
+    (trade.market ? `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}` : 'Unknown');
+
+  // Truncate long market names
+  const marketDisplay = marketName.length > 60 ? marketName.substring(0, 57) + '...' : marketName;
 
   return html`
     <div class="log-entry">
@@ -681,9 +686,11 @@ function renderLogEntry(trade) {
         <span class="badge ${typeClass}">${icon} ${typeLabel}</span>
       </span>
       <span class="log-message">
+        ${trade.icon ? html`<img src="${trade.icon}" alt="" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;" />` : ''}
+        ${marketDisplay}
+        ${trade.outcome ? ` - ${trade.outcome}` : ''} │
         ${trade.side} ${trade.size.toFixed(2)} @ ${trade.price.toFixed(4)} │
-        ${formatUSD(trade.value)} │
-        ${marketShort}
+        ${formatUSD(trade.value)}
         ${trade.latencyMs ? ` │ ${trade.latencyMs}ms` : ''}
       </span>
       ${trade.error ? html`<div class="log-error">Error: ${trade.error}</div>` : ''}

@@ -50,6 +50,11 @@ export interface Trade {
   timestamp: number;
   outcome?: string;
   status?: string;
+  // Market metadata (included in API responses)
+  title?: string;
+  slug?: string;
+  icon?: string;
+  eventSlug?: string;
 }
 
 /**

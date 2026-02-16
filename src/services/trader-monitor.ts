@@ -232,17 +232,19 @@ export class TraderMonitor extends EventEmitter {
       return;
     }
 
+    // Use readable market name
+    const marketName = trade.title || trade.slug || `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}`;
+
     logger.info(
       {
-        tradeId: trade.id,
-        market: trade.market?.substring(0, 40) || 'unknown',
+        market: marketName,
+        outcome: trade.outcome,
         side: trade.side,
         size: Number(trade.size).toFixed(2),
         price: Number(trade.price).toFixed(4),
         value: `$${tradeValue.toFixed(2)}`,
-        maker: `${trade.maker_address.substring(0, 10)}...`,
       },
-      '✅ Target trader trade detected - processing'
+      '✅ Target trade detected'
     );
 
     // Emit trade event

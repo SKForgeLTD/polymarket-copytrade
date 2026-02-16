@@ -328,7 +328,7 @@ export class Orchestrator {
     );
 
     // Add to trade history
-    const detectedEntry = {
+    const detectedEntry: TradeHistoryEntry = {
       id: trade.id,
       timestamp: Date.now(),
       type: 'target_detected' as const,
@@ -337,6 +337,11 @@ export class Orchestrator {
       size: Number(trade.size),
       price: Number(trade.price),
       value: Number(trade.size) * Number(trade.price),
+      // Include market metadata (only if defined)
+      ...(trade.title && { title: trade.title }),
+      ...(trade.slug && { slug: trade.slug }),
+      ...(trade.icon && { icon: trade.icon }),
+      ...(trade.outcome && { outcome: trade.outcome }),
     };
     this.addToHistory(detectedEntry);
 
@@ -458,10 +463,13 @@ export class Orchestrator {
           price: result.executedPrice || Number(trade.price),
           value: (result.executedSize || Number(trade.size)) * (result.executedPrice || Number(trade.price)),
           latencyMs,
+          // Include market metadata (only if defined)
+          ...(result.orderId && { orderId: result.orderId }),
+          ...(trade.title && { title: trade.title }),
+          ...(trade.slug && { slug: trade.slug }),
+          ...(trade.icon && { icon: trade.icon }),
+          ...(trade.outcome && { outcome: trade.outcome }),
         };
-        if (result.orderId) {
-          executedEntry.orderId = result.orderId;
-        }
         this.addToHistory(executedEntry);
 
         // Broadcast to SSE clients
@@ -498,10 +506,13 @@ export class Orchestrator {
           price: Number(trade.price),
           value: Number(trade.size) * Number(trade.price),
           latencyMs,
+          // Include market metadata (only if defined)
+          ...(result.error && { error: result.error }),
+          ...(trade.title && { title: trade.title }),
+          ...(trade.slug && { slug: trade.slug }),
+          ...(trade.icon && { icon: trade.icon }),
+          ...(trade.outcome && { outcome: trade.outcome }),
         };
-        if (result.error) {
-          failedEntry.error = result.error;
-        }
         this.addToHistory(failedEntry);
 
         // Broadcast to SSE clients

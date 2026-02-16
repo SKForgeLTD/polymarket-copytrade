@@ -34,6 +34,11 @@ interface ActivityTradePayload {
   timestamp: number;
   outcome: string;
   transactionHash?: string;
+  // Market metadata (may be included in payloads)
+  title?: string;
+  slug?: string;
+  icon?: string;
+  eventSlug?: string;
 }
 
 /**
@@ -213,18 +218,24 @@ export class PolymarketRTDSClient extends EventEmitter {
         timestamp: payload.timestamp,
         outcome: payload.outcome,
         status: 'MATCHED',
+        ...(payload.title && { title: payload.title }),
+        ...(payload.slug && { slug: payload.slug }),
+        ...(payload.icon && { icon: payload.icon }),
+        ...(payload.eventSlug && { eventSlug: payload.eventSlug }),
       };
+
+      // Log with readable market name
+      const marketName = trade.title || trade.slug || `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}`;
 
       logger.info(
         {
-          tradeId: trade.id,
-          market: trade.market,
+          market: marketName,
           outcome: trade.outcome,
           side: trade.side,
           size: trade.size,
           price: trade.price,
         },
-        'Received trade from WebSocket'
+        '📥 Trade detected'
       );
 
       this.emit('trade', trade);

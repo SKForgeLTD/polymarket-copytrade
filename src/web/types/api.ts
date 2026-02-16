@@ -85,6 +85,11 @@ export interface TradeHistoryEntry {
   orderId?: string;
   error?: string;
   latencyMs?: number;
+  // Market metadata
+  title?: string;
+  slug?: string;
+  icon?: string;
+  outcome?: string;
 }
 
 /**

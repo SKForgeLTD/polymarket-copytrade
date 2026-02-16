@@ -245,34 +245,62 @@ export class PolymarketClobClient {
         );
 
         // Create and post the order in one call
-        // This returns the orderID directly (or error object if failed)
-        const orderId = await this.client.createAndPostOrder(params, {}, OrderType.GTC);
+        // Returns orderID (string) or full order object (when matched)
+        const orderResponse = await this.client.createAndPostOrder(params, {}, OrderType.GTC);
 
-        // Validate response - CLOB client sometimes returns error objects instead of throwing
-        if (!orderId || typeof orderId !== 'string') {
+        let orderId: string;
+        let orderStatus: string = 'LIVE';
+
+        // Handle different response formats
+        if (orderResponse && typeof orderResponse === 'object') {
+          const response = orderResponse as any;
+
+          // Check for error
+          if (response.error || response.status === 400) {
+            throw new Error(
+              `Order creation failed: ${response.error || 'Unknown error'} (status: ${response.status})`
+            );
+          }
+
+          // Extract orderID from successful response
+          if (response.orderID) {
+            orderId = response.orderID;
+            orderStatus = response.status || 'MATCHED';
+
+            logger.info(
+              {
+                orderID: orderId,
+                status: orderStatus,
+                takingAmount: response.takingAmount,
+                makingAmount: response.makingAmount,
+                txHash: response.transactionsHashes?.[0],
+              },
+              'Order matched successfully'
+            );
+          } else {
+            throw new Error(
+              `Invalid order response: ${JSON.stringify(orderResponse)}`
+            );
+          }
+        } else if (typeof orderResponse === 'string') {
+          // String response (pending order)
+          orderId = orderResponse;
+          logger.info(
+            {
+              orderID: orderId,
+              status: 'LIVE',
+            },
+            'Order created successfully'
+          );
+        } else {
           throw new Error(
-            `Invalid order response: ${JSON.stringify(orderId)}`
+            `Invalid order response: ${JSON.stringify(orderResponse)}`
           );
         }
-
-        // Check if response is actually an error object disguised as string
-        if ((orderId as any).error || (orderId as any).status === 400) {
-          throw new Error(
-            `Order creation failed: ${(orderId as any).error || 'Unknown error'} (status: ${(orderId as any).status})`
-          );
-        }
-
-        logger.info(
-          {
-            orderID: orderId,
-            status: 'LIVE',
-          },
-          'Order created successfully'
-        );
 
         const response: OrderResponse = {
           orderID: orderId,
-          status: 'LIVE',
+          status: orderStatus,
         };
 
         return response;

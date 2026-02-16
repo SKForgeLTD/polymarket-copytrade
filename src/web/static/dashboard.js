@@ -19,10 +19,123 @@ let state = {
 // EventSource for real-time updates
 let eventSource = null;
 
+// Audio context for sound notifications
+let audioContext = null;
+
+/**
+ * Sound Manager - Classic OS notification sounds (macOS/Windows XP style)
+ */
+const SoundManager = {
+  volume: 0.2, // 20% volume
+
+  /**
+   * Initialize audio context (requires user interaction)
+   */
+  init() {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume context if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+  },
+
+  /**
+   * Play a smooth note (sine wave for classic OS sound)
+   */
+  playNote(frequency, duration, startTime = 0) {
+    if (!audioContext) return;
+
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.type = 'sine'; // Smooth sine wave for classic OS feel
+    oscillator.frequency.value = frequency;
+
+    const now = audioContext.currentTime + startTime;
+
+    // Smooth envelope (attack-decay-sustain-release)
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(this.volume, now + 0.015);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+    oscillator.start(now);
+    oscillator.stop(now + duration);
+  },
+
+  /**
+   * Play a chord (multiple notes simultaneously)
+   */
+  playChord(frequencies, duration, startTime = 0) {
+    for (const freq of frequencies) {
+      this.playNote(freq, duration, startTime);
+    }
+  },
+
+  /**
+   * Target detected - Glass (like macOS "Glass")
+   * High gentle ding
+   */
+  targetDetected() {
+    this.playNote(1318.51, 0.3); // E6 - clear, high ping
+  },
+
+  /**
+   * Copy executed - Success chord (like Windows XP "Windows Notify")
+   * Ascending major chord
+   */
+  copyExecuted() {
+    // C major chord ascending
+    this.playNote(523.25, 0.15, 0);      // C5
+    this.playNote(659.25, 0.2, 0.06);    // E5
+    this.playNote(783.99, 0.35, 0.12);   // G5
+  },
+
+  /**
+   * Copy failed - Error (like Windows XP "Critical Stop")
+   * Low warning tone
+   */
+  copyFailed() {
+    // Dissonant interval
+    this.playChord([493.88, 466.16], 0.25, 0);  // B4 + Bb4 together
+    this.playNote(392.00, 0.35, 0.15);          // G4 - resolution down
+  },
+
+  /**
+   * Circuit breaker - Alert (like macOS "Basso")
+   * Deep warning sound
+   */
+  circuitBreaker() {
+    this.playNote(220.00, 0.4, 0);      // A3 - deep
+    this.playNote(220.00, 0.4, 0.35);   // A3 - repeat
+  },
+
+  /**
+   * Connection change - Simple notification
+   */
+  connectionChange(connected) {
+    if (connected) {
+      // Quick ascending interval (reconnected)
+      this.playNote(659.25, 0.12, 0);    // E5
+      this.playNote(783.99, 0.2, 0.08);  // G5
+    } else {
+      // Single low tone (disconnected)
+      this.playNote(329.63, 0.25);       // E4
+    }
+  }
+};
+
 /**
  * Initialize dashboard
  */
 async function init() {
+  // Initialize audio on first user interaction
+  document.addEventListener('click', () => SoundManager.init(), { once: true });
+  document.addEventListener('keydown', () => SoundManager.init(), { once: true });
   console.log('Initializing dashboard...');
 
   // Fetch initial data
@@ -108,6 +221,7 @@ function connectSSE() {
       type: 'target_detected',
       timestamp: Date.now(),
     });
+    SoundManager.targetDetected();
     renderApp();
   });
 
@@ -118,6 +232,7 @@ function connectSSE() {
       type: 'copy_executed',
       timestamp: Date.now(),
     });
+    SoundManager.copyExecuted();
     renderApp();
   });
 
@@ -128,12 +243,14 @@ function connectSSE() {
       type: 'copy_failed',
       timestamp: Date.now(),
     });
+    SoundManager.copyFailed();
     renderApp();
   });
 
   eventSource.addEventListener('circuit_breaker', (event) => {
     const data = JSON.parse(event.data);
     console.log('Circuit breaker event:', data);
+    SoundManager.circuitBreaker();
     fetchStatus(); // Refresh full status
   });
 
@@ -141,6 +258,7 @@ function connectSSE() {
     const data = JSON.parse(event.data);
     console.log('WebSocket connection status:', data.connected);
     state.websocketConnected = data.connected;
+    SoundManager.connectionChange(data.connected);
     renderApp();
   });
 
@@ -269,7 +387,7 @@ function renderHeader() {
       <div class="subtitle">
         ${state.connected ? '⚡ Real-time' : '⚠ Polling'} │
         Updated: ${state.lastUpdate ? formatTime(state.lastUpdate) : 'Never'} │
-        Uptime: ${formatDuration(bot.uptime)}
+        Uptime: ${state.uptime || formatDuration(bot.uptime)}
       </div>
     </div>
   `;

@@ -416,21 +416,48 @@ export class TradeExecutor {
 
     // Target has existing position - check if current price is favorable
     const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset_id);
-    if (!currentPrices || !currentPrices.ask) {
-      // Market likely closed/settled - skip gracefully (not an error)
+
+    // Only skip if API returned null (true error or 404)
+    if (!currentPrices) {
       logger.info(
         { tokenId: targetTrade.asset_id, market: targetTrade.market },
-        'Market has no order book (likely closed/settled) - skipping trade'
+        'Market order book unavailable (likely closed/settled) - skipping trade'
       );
       return {
         copy: false,
-        reason: 'Market closed/settled (no order book)',
+        reason: 'Market closed/settled (API returned no order book)',
       };
     }
 
-    const currentPrice = currentPrices.ask; // What we'd pay to buy
+    // Log current market state
+    logger.debug(
+      {
+        tokenId: targetTrade.asset_id,
+        bid: currentPrices.bid,
+        ask: currentPrices.ask,
+        targetCost: targetExistingPosition.avgPrice,
+      },
+      'Checking current market prices for BUY trade'
+    );
+
+    // If no ask orders (ask = 0), we can still place a bid order
+    // The market isn't closed - there's just no sellers at this moment
+    const currentPrice = currentPrices.ask > 0 ? currentPrices.ask : targetExistingPosition.avgPrice;
     const targetCost = targetExistingPosition.avgPrice;
     const maxAcceptablePrice = targetCost * 1.01; // Allow up to 1% worse price
+
+    // If no asks available, place order at target's cost (will sit in book)
+    if (currentPrices.ask === 0) {
+      logger.info(
+        {
+          tokenId: targetTrade.asset_id,
+          targetCost: targetCost.toFixed(4),
+          hasBids: currentPrices.bid > 0,
+        },
+        '⚠️ No ask orders available - will place bid at target cost (may not fill immediately)'
+      );
+      return { copy: true };
+    }
 
     // Copy if we can buy at same price or within 1% of target's average cost
     if (currentPrice <= maxAcceptablePrice) {

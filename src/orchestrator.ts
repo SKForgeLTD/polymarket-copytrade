@@ -3,13 +3,11 @@ import { PolymarketRTDSClient } from './clients/rtds-client.js';
 import type { Config } from './config/index.js';
 import { createChildLogger } from './logger/index.js';
 import { PositionCalculator } from './services/position-calculator.js';
-import { PositionEntryAnalyzer } from './services/position-entry-analyzer.js';
 import { PositionManager } from './services/position-manager.js';
 import { RiskManager } from './services/risk-manager.js';
 import { TradeExecutor } from './services/trade-executor.js';
-import { TraderMonitor, type ConnectionStatus } from './services/trader-monitor.js';
+import { type ConnectionStatus, TraderMonitor } from './services/trader-monitor.js';
 import type { Trade } from './types/polymarket.js';
-import { DEFAULT_ENTRY_CONFIG } from './types/position-entry.js';
 import type { TradeHistoryEntry } from './web/types/api.js';
 
 const logger = createChildLogger({ module: 'Orchestrator' });
@@ -22,14 +20,14 @@ export class Orchestrator {
   private clobClient: PolymarketClobClient;
   private positionManager: PositionManager;
   private positionCalculator: PositionCalculator;
-  private positionEntryAnalyzer: PositionEntryAnalyzer;
   private riskManager: RiskManager;
   private tradeExecutor: TradeExecutor;
   private traderMonitor: TraderMonitor;
   private isRunning = false;
   private startTime: number = 0;
   private uptimeInterval: NodeJS.Timeout | null = null;
-  private webServer: InstanceType<typeof import('./web/server.js').WebServer> | undefined = undefined;
+  private webServer: InstanceType<typeof import('./web/server.js').WebServer> | undefined =
+    undefined;
 
   // Trade queue for high-frequency processing
   private tradeQueue: Trade[] = [];
@@ -58,7 +56,6 @@ export class Orchestrator {
     clobClient: PolymarketClobClient,
     positionManager: PositionManager,
     positionCalculator: PositionCalculator,
-    positionEntryAnalyzer: PositionEntryAnalyzer,
     riskManager: RiskManager,
     tradeExecutor: TradeExecutor,
     traderMonitor: TraderMonitor
@@ -67,7 +64,6 @@ export class Orchestrator {
     this.clobClient = clobClient;
     this.positionManager = positionManager;
     this.positionCalculator = positionCalculator;
-    this.positionEntryAnalyzer = positionEntryAnalyzer;
     this.riskManager = riskManager;
     this.tradeExecutor = tradeExecutor;
     this.traderMonitor = traderMonitor;
@@ -84,11 +80,6 @@ export class Orchestrator {
     // Initialize services
     const positionManager = new PositionManager();
     const positionCalculator = new PositionCalculator(config);
-    const positionEntryAnalyzer = new PositionEntryAnalyzer(
-      config,
-      clobClient,
-      DEFAULT_ENTRY_CONFIG
-    );
     const riskManager = new RiskManager(config);
     const tradeExecutor = new TradeExecutor(
       clobClient,
@@ -105,7 +96,6 @@ export class Orchestrator {
       clobClient,
       positionManager,
       positionCalculator,
-      positionEntryAnalyzer,
       riskManager,
       tradeExecutor,
       traderMonitor
@@ -166,7 +156,10 @@ export class Orchestrator {
       await this.traderMonitor.start();
 
       // Start web server if enabled
-      logger.info({ webEnabled: this.config.web.enabled, webPort: this.config.web.port }, 'Web configuration');
+      logger.info(
+        { webEnabled: this.config.web.enabled, webPort: this.config.web.port },
+        'Web configuration'
+      );
       if (this.config.web.enabled) {
         logger.info('Starting web server...');
         await this.startWebServer();
@@ -278,8 +271,15 @@ export class Orchestrator {
    */
   private async handleTradeDetected(trade: Trade): Promise<void> {
     // Check if already processed
-    if (this.positionManager.isTradeProcessed(trade.id)) {
-      logger.debug({ tradeId: trade.id }, 'Trade already processed, skipping');
+    if (
+      this.positionManager.isTradeProcessed(
+        trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`
+      )
+    ) {
+      logger.debug(
+        { tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}` },
+        'Trade already processed, skipping'
+      );
       return;
     }
 
@@ -288,7 +288,7 @@ export class Orchestrator {
     if (targetTradeValue < this.config.trading.minTradeSizeUsd) {
       logger.debug(
         {
-          tradeId: trade.id,
+          tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
           value: targetTradeValue.toFixed(2),
           minValue: this.config.trading.minTradeSizeUsd,
         },
@@ -304,7 +304,7 @@ export class Orchestrator {
 
       logger.warn(
         {
-          tradeId: trade.id,
+          tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
           queueLength: this.tradeQueue.length,
           maxQueueSize: this.maxQueueSize,
           overflowCount: this.metrics.queueOverflows,
@@ -316,8 +316,8 @@ export class Orchestrator {
 
     logger.info(
       {
-        tradeId: trade.id,
-        market: trade.market,
+        tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
+        market: trade.conditionId,
         side: trade.side,
         size: trade.size,
         price: trade.price,
@@ -329,10 +329,10 @@ export class Orchestrator {
 
     // Add to trade history
     const detectedEntry: TradeHistoryEntry = {
-      id: trade.id,
+      id: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
       timestamp: Date.now(),
       type: 'target_detected' as const,
-      market: trade.market,
+      market: trade.conditionId,
       side: trade.side,
       size: Number(trade.size),
       price: Number(trade.price),
@@ -385,7 +385,7 @@ export class Orchestrator {
         .catch((error) => {
           logger.error(
             {
-              tradeId: trade.id,
+              tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
               error: error instanceof Error ? error.message : String(error),
             },
             'Error processing trade from queue'
@@ -412,13 +412,13 @@ export class Orchestrator {
 
     try {
       // Validate trade has required fields
-      if (!trade.asset_id || !trade.market || !trade.maker_address) {
+      if (!trade.asset || !trade.conditionId || !trade.proxyWallet) {
         logger.warn(
           {
-            tradeId: trade.id,
-            hasAssetId: !!trade.asset_id,
-            hasMarket: !!trade.market,
-            hasMaker: !!trade.maker_address,
+            tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
+            hasAssetId: !!trade.asset,
+            hasMarket: !!trade.conditionId,
+            hasMaker: !!trade.proxyWallet,
           },
           'Trade missing required fields, skipping'
         );
@@ -454,14 +454,16 @@ export class Orchestrator {
 
         // Add to trade history
         const executedEntry: TradeHistoryEntry = {
-          id: trade.id,
+          id: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
           timestamp: Date.now(),
           type: 'copy_executed',
-          market: trade.market,
+          market: trade.conditionId,
           side: trade.side,
           size: result.executedSize || Number(trade.size),
           price: result.executedPrice || Number(trade.price),
-          value: (result.executedSize || Number(trade.size)) * (result.executedPrice || Number(trade.price)),
+          value:
+            (result.executedSize || Number(trade.size)) *
+            (result.executedPrice || Number(trade.price)),
           latencyMs,
           // Include market metadata (only if defined)
           ...(result.orderId && { orderId: result.orderId }),
@@ -482,7 +484,9 @@ export class Orchestrator {
         }
 
         // Mark trade as processed
-        this.positionManager.markTradeProcessed(trade.id);
+        this.positionManager.markTradeProcessed(
+          trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`
+        );
       } else {
         this.metrics.tradesFailed++;
 
@@ -497,10 +501,10 @@ export class Orchestrator {
 
         // Add to trade history
         const failedEntry: TradeHistoryEntry = {
-          id: trade.id,
+          id: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
           timestamp: Date.now(),
           type: 'copy_failed',
-          market: trade.market,
+          market: trade.conditionId,
           side: trade.side,
           size: Number(trade.size),
           price: Number(trade.price),
@@ -705,7 +709,6 @@ export class Orchestrator {
   getServices() {
     return {
       positionManager: this.positionManager,
-      positionEntryAnalyzer: this.positionEntryAnalyzer,
       clobClient: this.clobClient,
       config: this.config,
     };

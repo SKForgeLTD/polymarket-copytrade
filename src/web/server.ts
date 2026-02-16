@@ -2,16 +2,16 @@
  * Fastify web server for monitoring dashboard
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Config } from '../config/index.js';
 import { createChildLogger } from '../logger/index.js';
 import type { Orchestrator } from '../orchestrator.js';
-import { SSEManager } from './sse-manager.js';
+import type { SSEManager } from './sse-manager.js';
 import type { BotStatusResponse, RecentTradesResponse } from './types/api.js';
 
 const logger = createChildLogger({ module: 'WebServer' });

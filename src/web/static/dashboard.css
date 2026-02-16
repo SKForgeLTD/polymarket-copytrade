@@ -10,7 +10,7 @@
 }
 
 body {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
   font-size: 14px;
   background: #0a0e14;
   color: #00ff00;
@@ -46,7 +46,7 @@ body {
 }
 
 .header::before {
-  content: '┌';
+  content: "┌";
   position: absolute;
   top: -2px;
   left: -2px;
@@ -55,7 +55,7 @@ body {
 }
 
 .header::after {
-  content: '┐';
+  content: "┐";
   position: absolute;
   top: -2px;
   right: -2px;
@@ -86,8 +86,13 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Grid Layout */
@@ -113,7 +118,7 @@ body {
 }
 
 .card::before {
-  content: '┌';
+  content: "┌";
   position: absolute;
   top: -2px;
   left: -2px;
@@ -121,7 +126,7 @@ body {
 }
 
 .card::after {
-  content: '┐';
+  content: "┐";
   position: absolute;
   top: -2px;
   right: -2px;
@@ -231,7 +236,7 @@ body {
 }
 
 .operations-log::before {
-  content: '┌';
+  content: "┌";
   position: absolute;
   top: -2px;
   left: -2px;
@@ -239,7 +244,7 @@ body {
 }
 
 .operations-log::after {
-  content: '┐';
+  content: "┐";
   position: absolute;
   top: -2px;
   right: -2px;
@@ -380,8 +385,14 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Error State */
@@ -403,14 +414,22 @@ body {
 }
 
 .loading::after {
-  content: '...';
+  content: "...";
   animation: loading 1.5s infinite;
 }
 
 @keyframes loading {
-  0%, 20% { content: '.'; }
-  40% { content: '..'; }
-  60%, 100% { content: '...'; }
+  0%,
+  20% {
+    content: ".";
+  }
+  40% {
+    content: "..";
+  }
+  60%,
+  100% {
+    content: "...";
+  }
 }
 
 /* Footer */

@@ -148,7 +148,7 @@ export class PolymarketRTDSClient extends EventEmitter {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         if (attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(2, attempt);
+          const delay = baseDelay * 2 ** attempt;
           logger.warn(
             { error: errorMessage, attempt: attempt + 1, maxRetries, delayMs: delay },
             'Failed to subscribe, retrying...'
@@ -198,26 +198,19 @@ export class PolymarketRTDSClient extends EventEmitter {
         return;
       }
 
-      // Convert to Trade format
-      // RTDS activity/trades messages have a different schema than clob_user trades
+      // Convert to Trade format (using real API field names)
       const side = payload.side === 'BUY' ? Side.BUY : Side.SELL;
 
-      // Generate unique trade ID with fallback including random component
-      const tradeId =
-        payload.transactionHash || `rtds-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
       const trade: Trade = {
-        id: tradeId,
-        market: payload.conditionId, // conditionId is the market ID
-        asset_id: payload.asset,
-        maker_address: payload.proxyWallet,
-        taker_address: '', // Activity topic doesn't provide taker
+        proxyWallet: payload.proxyWallet,
         side,
+        asset: payload.asset,
+        conditionId: payload.conditionId,
         size: String(payload.size), // Convert to string for consistency
         price: String(payload.price),
         timestamp: payload.timestamp,
         outcome: payload.outcome,
-        status: 'MATCHED',
+        ...(payload.transactionHash && { transactionHash: payload.transactionHash }),
         ...(payload.title && { title: payload.title }),
         ...(payload.slug && { slug: payload.slug }),
         ...(payload.icon && { icon: payload.icon }),
@@ -225,7 +218,10 @@ export class PolymarketRTDSClient extends EventEmitter {
       };
 
       // Log with readable market name
-      const marketName = trade.title || trade.slug || `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}`;
+      const marketName =
+        trade.title ||
+        trade.slug ||
+        `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
 
       logger.info(
         {

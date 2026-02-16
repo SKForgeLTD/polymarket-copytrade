@@ -56,7 +56,7 @@ export class TradeExecutor {
 
         logger.info(
           {
-            tradeId: targetTrade.id,
+            tradeHash: targetTrade.transactionHash,
             side: targetTrade.side,
             reason: shouldCopy.reason,
             marketClosed: isMarketClosed,
@@ -80,10 +80,10 @@ export class TradeExecutor {
       logger.info({ balance }, 'Retrieved current balance');
 
       // Get best prices for the market
-      const prices = await this.clobClient.getBestPrices(targetTrade.asset_id);
+      const prices = await this.clobClient.getBestPrices(targetTrade.asset);
       if (!prices) {
         logger.warn(
-          { tokenId: targetTrade.asset_id },
+          { tokenId: targetTrade.asset },
           'No order book available - cannot execute trade (market may be closed)'
         );
         return {
@@ -136,7 +136,7 @@ export class TradeExecutor {
       // Validate trade with risk manager
       const positions = this.positionManager.getAllUserPositions();
       const validation = await this.riskManager.validateTrade(
-        targetTrade.asset_id,
+        targetTrade.asset,
         side,
         roundedSize,
         roundedPrice,
@@ -162,7 +162,7 @@ export class TradeExecutor {
       // Execute order
       logger.info(
         {
-          tokenId: targetTrade.asset_id,
+          tokenId: targetTrade.asset,
           side,
           size: roundedSize,
           price: roundedPrice,
@@ -172,7 +172,7 @@ export class TradeExecutor {
       );
 
       const orderRequest: OrderRequest = {
-        tokenID: targetTrade.asset_id,
+        tokenID: targetTrade.asset,
         price: roundedPrice,
         size: roundedSize,
         side,
@@ -186,15 +186,14 @@ export class TradeExecutor {
 
       // Update position immediately (optimistic - assumes order will fill)
       const executedTrade: Trade = {
-        id: orderResponse.orderID,
-        market: targetTrade.market,
-        asset_id: targetTrade.asset_id,
-        maker_address: this.clobClient.getAddress(),
+        proxyWallet: this.clobClient.getAddress(),
         side,
+        asset: targetTrade.asset,
+        conditionId: targetTrade.conditionId,
         size: String(roundedSize),
         price: String(roundedPrice),
         timestamp: Date.now(),
-        status: 'LIVE', // Order created but not yet filled
+        transactionHash: orderResponse.orderID, // Use orderID as identifier until filled
       };
 
       this.positionManager.updatePosition(executedTrade, true);
@@ -374,7 +373,7 @@ export class TradeExecutor {
     if (side === Side.SELL) {
       const userPositions = this.positionManager.getAllUserPositions();
       const existingPosition = userPositions.find(
-        (p) => p.tokenId === targetTrade.asset_id && p.side === Side.BUY
+        (p) => p.tokenId === targetTrade.asset && p.side === Side.BUY
       );
 
       if (!existingPosition) {
@@ -386,7 +385,7 @@ export class TradeExecutor {
 
       logger.info(
         {
-          tokenId: targetTrade.asset_id,
+          tokenId: targetTrade.asset,
           ourPosition: existingPosition.size.toFixed(2),
           ourCost: existingPosition.avgPrice.toFixed(4),
         },
@@ -399,14 +398,14 @@ export class TradeExecutor {
     // BUY trades: Check price favorability
     const targetPositions = this.positionManager.getAllTargetPositions();
     const targetExistingPosition = targetPositions.find(
-      (p) => p.tokenId === targetTrade.asset_id && p.side === Side.BUY
+      (p) => p.tokenId === targetTrade.asset && p.side === Side.BUY
     );
 
     // If target has no existing position, this is their entry - copy it
     if (!targetExistingPosition) {
       logger.info(
         {
-          tokenId: targetTrade.asset_id,
+          tokenId: targetTrade.asset,
           tradePrice: Number(targetTrade.price).toFixed(4),
         },
         '✅ BUY trade - target entering new position'
@@ -415,12 +414,12 @@ export class TradeExecutor {
     }
 
     // Target has existing position - check if current price is favorable
-    const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset_id);
+    const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset);
 
     // Only skip if API returned null (true error or 404)
     if (!currentPrices) {
       logger.info(
-        { tokenId: targetTrade.asset_id, market: targetTrade.market },
+        { tokenId: targetTrade.asset, market: targetTrade.conditionId },
         'Market order book unavailable (likely closed/settled) - skipping trade'
       );
       return {
@@ -432,7 +431,7 @@ export class TradeExecutor {
     // Log current market state
     logger.debug(
       {
-        tokenId: targetTrade.asset_id,
+        tokenId: targetTrade.asset,
         bid: currentPrices.bid,
         ask: currentPrices.ask,
         targetCost: targetExistingPosition.avgPrice,
@@ -442,7 +441,8 @@ export class TradeExecutor {
 
     // If no ask orders (ask = 0), we can still place a bid order
     // The market isn't closed - there's just no sellers at this moment
-    const currentPrice = currentPrices.ask > 0 ? currentPrices.ask : targetExistingPosition.avgPrice;
+    const currentPrice =
+      currentPrices.ask > 0 ? currentPrices.ask : targetExistingPosition.avgPrice;
     const targetCost = targetExistingPosition.avgPrice;
     const maxAcceptablePrice = targetCost * 1.01; // Allow up to 1% worse price
 
@@ -450,7 +450,7 @@ export class TradeExecutor {
     if (currentPrices.ask === 0) {
       logger.info(
         {
-          tokenId: targetTrade.asset_id,
+          tokenId: targetTrade.asset,
           targetCost: targetCost.toFixed(4),
           hasBids: currentPrices.bid > 0,
         },
@@ -464,7 +464,7 @@ export class TradeExecutor {
       const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
       logger.info(
         {
-          tokenId: targetTrade.asset_id,
+          tokenId: targetTrade.asset,
           currentPrice: currentPrice.toFixed(4),
           targetCost: targetCost.toFixed(4),
           deviation: `${priceDeviation >= 0 ? '+' : ''}${priceDeviation.toFixed(2)}%`,
@@ -480,7 +480,7 @@ export class TradeExecutor {
     const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
     logger.info(
       {
-        tokenId: targetTrade.asset_id,
+        tokenId: targetTrade.asset,
         currentPrice: currentPrice.toFixed(4),
         targetCost: targetCost.toFixed(4),
         maxAcceptable: maxAcceptablePrice.toFixed(4),
@@ -520,7 +520,6 @@ export class TradeExecutor {
         // Update position with actual fill data
         const updatedTrade: Trade = {
           ...trade,
-          status: 'MATCHED',
           size: result.filledSize ? String(result.filledSize) : trade.size,
           price: result.filledPrice ? String(result.filledPrice) : trade.price,
         };

@@ -41,6 +41,7 @@ export class DataApiClient {
 
   /**
    * Get trades for a specific user
+   * API returns trades with fields: proxyWallet, side, asset, conditionId, size (number), price (number), timestamp
    */
   async getUserTrades(
     userAddress: string,
@@ -65,6 +66,7 @@ export class DataApiClient {
         params.append('endTime', String(options.endTime));
       }
 
+      // API already returns size/price as strings (verified!)
       const response = await this.client.get<Trade[]>('/trades', { params });
 
       logger.debug(

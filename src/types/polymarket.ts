@@ -36,25 +36,36 @@ export interface Token {
 }
 
 /**
- * Trade from Data API or WebSocket
+ * Trade from Data API or WebSocket (Real API format)
+ * Uses actual field names from Polymarket APIs
  */
 export interface Trade {
-  id: string;
-  market: string;
-  asset_id: string;
-  maker_address: string;
-  taker_address?: string;
-  side: Side;
-  size: string;
-  price: string;
-  timestamp: number;
-  outcome?: string;
-  status?: string;
+  // Core trade data (matches Data API and RTDS format)
+  proxyWallet: string; // Trader's proxy wallet address
+  side: Side; // BUY or SELL
+  asset: string; // Token ID
+  conditionId: string; // Market/condition ID
+  size: string; // Trade size (kept as string for precision)
+  price: string; // Trade price (kept as string for precision)
+  timestamp: number; // Unix timestamp
+
+  // Optional trade metadata
+  outcome?: string; // Outcome name (e.g., "Yes", "No")
+  outcomeIndex?: number; // Outcome position index
+  transactionHash?: string; // Blockchain transaction hash
+
   // Market metadata (included in API responses)
-  title?: string;
-  slug?: string;
-  icon?: string;
-  eventSlug?: string;
+  title?: string; // Market title
+  slug?: string; // Market slug
+  icon?: string; // Market icon URL
+  eventSlug?: string; // Event slug
+
+  // User metadata (from Data API)
+  name?: string; // User display name
+  pseudonym?: string; // Anonymous identifier
+  bio?: string; // User biography
+  profileImage?: string; // User avatar URL
+  profileImageOptimized?: string; // Optimized avatar URL
 }
 
 /**

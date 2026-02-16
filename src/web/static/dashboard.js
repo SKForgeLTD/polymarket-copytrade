@@ -5,7 +5,7 @@
 const { html, render } = window;
 
 // Application state
-let state = {
+const state = {
   status: null,
   trades: [],
   error: null,
@@ -90,9 +90,9 @@ const SoundManager = {
    */
   copyExecuted() {
     // C major chord ascending
-    this.playNote(523.25, 0.15, 0);      // C5
-    this.playNote(659.25, 0.2, 0.06);    // E5
-    this.playNote(783.99, 0.35, 0.12);   // G5
+    this.playNote(523.25, 0.15, 0); // C5
+    this.playNote(659.25, 0.2, 0.06); // E5
+    this.playNote(783.99, 0.35, 0.12); // G5
   },
 
   /**
@@ -101,8 +101,8 @@ const SoundManager = {
    */
   copyFailed() {
     // Dissonant interval
-    this.playChord([493.88, 466.16], 0.25, 0);  // B4 + Bb4 together
-    this.playNote(392.00, 0.35, 0.15);          // G4 - resolution down
+    this.playChord([493.88, 466.16], 0.25, 0); // B4 + Bb4 together
+    this.playNote(392.0, 0.35, 0.15); // G4 - resolution down
   },
 
   /**
@@ -110,8 +110,8 @@ const SoundManager = {
    * Deep warning sound
    */
   circuitBreaker() {
-    this.playNote(220.00, 0.4, 0);      // A3 - deep
-    this.playNote(220.00, 0.4, 0.35);   // A3 - repeat
+    this.playNote(220.0, 0.4, 0); // A3 - deep
+    this.playNote(220.0, 0.4, 0.35); // A3 - repeat
   },
 
   /**
@@ -120,13 +120,13 @@ const SoundManager = {
   connectionChange(connected) {
     if (connected) {
       // Quick ascending interval (reconnected)
-      this.playNote(659.25, 0.12, 0);    // E5
-      this.playNote(783.99, 0.2, 0.08);  // G5
+      this.playNote(659.25, 0.12, 0); // E5
+      this.playNote(783.99, 0.2, 0.08); // G5
     } else {
       // Single low tone (disconnected)
-      this.playNote(329.63, 0.25);       // E4
+      this.playNote(329.63, 0.25); // E4
     }
-  }
+  },
 };
 
 /**
@@ -335,40 +335,52 @@ function renderApp() {
   const app = document.getElementById('app');
 
   if (state.loading) {
-    render(html`
+    render(
+      html`
       <div class="container">
         <div class="loading">Loading dashboard</div>
       </div>
-    `, app);
+    `,
+      app
+    );
     return;
   }
 
   if (state.error) {
-    render(html`
+    render(
+      html`
       <div class="container">
         <div class="error-message">${state.error}</div>
       </div>
-    `, app);
+    `,
+      app
+    );
     return;
   }
 
   if (!state.status) {
-    render(html`
+    render(
+      html`
       <div class="container">
         <div class="error-message">No data available</div>
       </div>
-    `, app);
+    `,
+      app
+    );
     return;
   }
 
-  render(html`
+  render(
+    html`
     <div class="container fade-in">
       ${renderHeader()}
       ${renderMetrics()}
       ${renderOperationsLog()}
       ${renderFooter()}
     </div>
-  `, app);
+  `,
+    app
+  );
 }
 
 /**
@@ -478,9 +490,10 @@ function renderRiskCard() {
         <div class="metric-row">
           <span class="metric-label">Circuit Breaker</span>
           <span class="metric-value">
-            ${circuitBreaker.isTripped
-              ? html`<span class="badge badge-error">ACTIVE</span>`
-              : html`<span class="badge badge-success">OK</span>`
+            ${
+              circuitBreaker.isTripped
+                ? html`<span class="badge badge-error">ACTIVE</span>`
+                : html`<span class="badge badge-success">OK</span>`
             }
           </span>
         </div>
@@ -493,9 +506,10 @@ function renderRiskCard() {
         <div class="metric-row">
           <span class="metric-label">Trading Allowed</span>
           <span class="metric-value">
-            ${risk.tradingAllowed
-              ? html`<span class="badge badge-success">YES</span>`
-              : html`<span class="badge badge-error">NO</span>`
+            ${
+              risk.tradingAllowed
+                ? html`<span class="badge badge-success">YES</span>`
+                : html`<span class="badge badge-error">NO</span>`
             }
           </span>
         </div>
@@ -523,18 +537,20 @@ function renderMonitoringCard() {
         <div class="metric-row">
           <span class="metric-label">Status</span>
           <span class="metric-value">
-            ${monitoring.isActive
-              ? html`<span class="badge badge-success">ACTIVE</span>`
-              : html`<span class="badge badge-error">INACTIVE</span>`
+            ${
+              monitoring.isActive
+                ? html`<span class="badge badge-success">ACTIVE</span>`
+                : html`<span class="badge badge-error">INACTIVE</span>`
             }
           </span>
         </div>
         <div class="metric-row">
           <span class="metric-label">WebSocket</span>
           <span class="metric-value">
-            ${monitoring.websocketConnected
-              ? html`<span class="badge badge-success">CONN</span>`
-              : html`<span class="badge badge-warning">DISC</span>`
+            ${
+              monitoring.websocketConnected
+                ? html`<span class="badge badge-success">CONN</span>`
+                : html`<span class="badge badge-warning">DISC</span>`
             }
           </span>
         </div>
@@ -636,9 +652,10 @@ function renderOperationsLog() {
   return html`
     <div class="operations-log">
       <div class="card-title">Recent Operations</div>
-      ${trades.length === 0
-        ? html`<div style="color: #006600; text-align: center; padding: 20px;">No operations yet</div>`
-        : trades.map(trade => renderLogEntry(trade))
+      ${
+        trades.length === 0
+          ? html`<div style="color: #006600; text-align: center; padding: 20px;">No operations yet</div>`
+          : trades.map((trade) => renderLogEntry(trade))
       }
     </div>
   `;
@@ -673,8 +690,12 @@ function renderLogEntry(trade) {
   }
 
   // Use readable market name (title > slug > short hash)
-  const marketName = trade.title || trade.slug ||
-    (trade.market ? `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}` : 'Unknown');
+  const marketName =
+    trade.title ||
+    trade.slug ||
+    (trade.market
+      ? `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}`
+      : 'Unknown');
 
   // Truncate long market names
   const marketDisplay = marketName.length > 60 ? marketName.substring(0, 57) + '...' : marketName;

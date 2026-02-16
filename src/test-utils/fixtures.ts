@@ -61,17 +61,15 @@ export function createMockConfig(overrides?: Partial<Config>): Config {
  */
 export function createMockTrade(overrides?: Partial<Trade>): Trade {
   const defaultTrade: Trade = {
-    id: `trade-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    market: 'test-market-123',
-    asset_id: 'test-token-456',
-    maker_address: '0x9876543210987654321098765432109876543210',
-    taker_address: '0x1111111111111111111111111111111111111111',
+    proxyWallet: '0x9876543210987654321098765432109876543210',
     side: Side.BUY,
+    asset: 'test-token-456',
+    conditionId: 'test-market-123',
     size: '100',
     price: '0.5',
     timestamp: Date.now(),
     outcome: 'YES',
-    status: 'MATCHED',
+    transactionHash: `0x${Date.now().toString(16)}${Math.random().toString(36).substring(2)}`,
   };
 
   return { ...defaultTrade, ...overrides };
@@ -141,9 +139,7 @@ export class MockLogger {
   }
 
   hasLog(level: string, messageSubstring: string): boolean {
-    return this.logs.some(
-      (log) => log.level === level && log.message.includes(messageSubstring)
-    );
+    return this.logs.some((log) => log.level === level && log.message.includes(messageSubstring));
   }
 
   getLogCount(level?: string): number {

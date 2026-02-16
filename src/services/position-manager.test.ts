@@ -3,12 +3,12 @@
  * Tests position tracking, deduplication, persistence, and overshoot detection
  */
 
-import { Side } from '@polymarket/clob-client';
-import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
-import { PositionManager } from './position-manager.js';
-import { createMockTrade, createMockPosition } from '../test-utils/fixtures.js';
-import type { Trade } from '../types/polymarket.js';
 import fs from 'node:fs/promises';
+import { Side } from '@polymarket/clob-client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMockPosition, createMockTrade } from '../test-utils/fixtures.js';
+import type { Trade } from '../types/polymarket.js';
+import { PositionManager } from './position-manager.js';
 
 // Mock the fs module
 vi.mock('node:fs/promises');
@@ -79,8 +79,8 @@ describe('PositionManager', () => {
   describe('updatePosition - new positions', () => {
     it('should create new user position from BUY trade', () => {
       const trade = createMockTrade({
-        asset_id: 'token-1',
-        market: 'market-1',
+        asset: 'token-1',
+        conditionId: 'market-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -99,7 +99,7 @@ describe('PositionManager', () => {
 
     it('should create new target position from SELL trade', () => {
       const trade = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '50',
         price: '0.6',
@@ -115,8 +115,8 @@ describe('PositionManager', () => {
       expect(position?.side).toBe(Side.SELL);
     });
 
-    it('should skip trade with missing asset_id', () => {
-      const invalidTrade = createMockTrade({ asset_id: '' });
+    it('should skip trade with missing asset', () => {
+      const invalidTrade = createMockTrade({ asset: '' });
 
       positionManager.updatePosition(invalidTrade, true);
 
@@ -124,7 +124,7 @@ describe('PositionManager', () => {
     });
 
     it('should skip trade with missing market', () => {
-      const invalidTrade = createMockTrade({ market: '' });
+      const invalidTrade = createMockTrade({ conditionId: '' });
 
       positionManager.updatePosition(invalidTrade, true);
 
@@ -136,7 +136,7 @@ describe('PositionManager', () => {
     it('should add to existing position with same side', () => {
       // Create initial position
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -145,7 +145,7 @@ describe('PositionManager', () => {
 
       // Add to position
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.6',
@@ -161,7 +161,7 @@ describe('PositionManager', () => {
 
     it('should calculate weighted average price correctly', () => {
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '200',
         price: '0.4',
@@ -169,7 +169,7 @@ describe('PositionManager', () => {
       positionManager.updatePosition(trade1, true);
 
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.7',
@@ -188,7 +188,7 @@ describe('PositionManager', () => {
     it('should reduce position with opposite side trade', () => {
       // Create BUY position
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -197,7 +197,7 @@ describe('PositionManager', () => {
 
       // Reduce with SELL
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '40',
         price: '0.6', // Price doesn't affect avgPrice when reducing
@@ -212,7 +212,7 @@ describe('PositionManager', () => {
 
     it('should close position when reduce equals position size', () => {
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -220,7 +220,7 @@ describe('PositionManager', () => {
       positionManager.updatePosition(trade1, true);
 
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '100', // Exact size
         price: '0.6',
@@ -233,7 +233,7 @@ describe('PositionManager', () => {
 
     it('should detect overshoot when closing trade exceeds position size', () => {
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -242,7 +242,7 @@ describe('PositionManager', () => {
 
       // Overshoot by 20
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '120', // More than position
         price: '0.6',
@@ -255,7 +255,7 @@ describe('PositionManager', () => {
 
     it('should reduce SELL position with BUY trade', () => {
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '100',
         price: '0.5',
@@ -263,7 +263,7 @@ describe('PositionManager', () => {
       positionManager.updatePosition(trade1, true);
 
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '30',
         price: '0.6',
@@ -278,8 +278,8 @@ describe('PositionManager', () => {
 
   describe('position getters', () => {
     beforeEach(() => {
-      const userTrade = createMockTrade({ asset_id: 'user-token' });
-      const targetTrade = createMockTrade({ asset_id: 'target-token' });
+      const userTrade = createMockTrade({ asset: 'user-token' });
+      const targetTrade = createMockTrade({ asset: 'target-token' });
 
       positionManager.updatePosition(userTrade, true);
       positionManager.updatePosition(targetTrade, false);
@@ -377,8 +377,8 @@ describe('PositionManager', () => {
 
   describe('clearAllPositions', () => {
     it('should clear all user and target positions', () => {
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-1' }), true);
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-2' }), false);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-1' }), true);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-2' }), false);
       positionManager.markTradeProcessed('trade-1');
 
       positionManager.clearAllPositions();
@@ -394,11 +394,11 @@ describe('PositionManager', () => {
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
 
-      const trade = createMockTrade({ asset_id: 'token-1' });
+      const trade = createMockTrade({ asset: 'token-1' });
       positionManager.updatePosition(trade, true);
 
       // Wait for async save to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(fs.mkdir).toHaveBeenCalled();
       expect(fs.writeFile).toHaveBeenCalled();
@@ -408,15 +408,14 @@ describe('PositionManager', () => {
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
 
-      const trade = createMockTrade({ asset_id: 'token-1' });
+      const trade = createMockTrade({ asset: 'token-1' });
       positionManager.updatePosition(trade, true);
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      expect(fs.mkdir).toHaveBeenCalledWith(
-        expect.stringContaining('test-state'),
-        { recursive: true }
-      );
+      expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining('test-state'), {
+        recursive: true,
+      });
     });
 
     it('should retry on save failure', async () => {
@@ -426,11 +425,11 @@ describe('PositionManager', () => {
         .mockRejectedValueOnce(new Error('Disk full'))
         .mockResolvedValueOnce(undefined); // Success on 3rd try
 
-      const trade = createMockTrade({ asset_id: 'token-1' });
+      const trade = createMockTrade({ asset: 'token-1' });
       positionManager.updatePosition(trade, true);
 
       // Wait for retries (1s + 2s + 4s = 7s, plus overhead)
-      await new Promise(resolve => setTimeout(resolve, 8000));
+      await new Promise((resolve) => setTimeout(resolve, 8000));
 
       expect(fs.writeFile).toHaveBeenCalledTimes(3);
     }, 10000); // Increase test timeout to 10 seconds
@@ -443,11 +442,11 @@ describe('PositionManager', () => {
         savedData = data as string;
       });
 
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-1' }), true);
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-2' }), false);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-1' }), true);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-2' }), false);
       positionManager.markTradeProcessed('trade-1');
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const state = JSON.parse(savedData);
       expect(state).toHaveProperty('userPositions');
@@ -469,9 +468,9 @@ describe('PositionManager', () => {
     });
 
     it('should calculate position counts correctly', () => {
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-1' }), true);
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-2' }), true);
-      positionManager.updatePosition(createMockTrade({ asset_id: 'token-3' }), false);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-1' }), true);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-2' }), true);
+      positionManager.updatePosition(createMockTrade({ asset: 'token-3' }), false);
 
       const summary = positionManager.getSummary();
 
@@ -481,12 +480,12 @@ describe('PositionManager', () => {
 
     it('should calculate total values correctly', () => {
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         size: '100',
         price: '0.5',
       });
       const trade2 = createMockTrade({
-        asset_id: 'token-2',
+        asset: 'token-2',
         size: '200',
         price: '0.3',
       });
@@ -516,7 +515,7 @@ describe('PositionManager', () => {
   describe('edge cases', () => {
     it('should handle very large position sizes', () => {
       const trade = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         size: '1000000',
         price: '0.5',
       });
@@ -530,7 +529,7 @@ describe('PositionManager', () => {
 
     it('should handle very small position sizes', () => {
       const trade = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         size: '0.01',
         price: '0.01',
       });
@@ -543,7 +542,7 @@ describe('PositionManager', () => {
     });
 
     it('should handle multiple positions for same token (different user/target)', () => {
-      const trade = createMockTrade({ asset_id: 'token-1', size: '100', price: '0.5' });
+      const trade = createMockTrade({ asset: 'token-1', size: '100', price: '0.5' });
 
       positionManager.updatePosition(trade, true); // User
       positionManager.updatePosition(trade, false); // Target
@@ -558,9 +557,9 @@ describe('PositionManager', () => {
 
     it('should handle rapid consecutive updates to same position', () => {
       const trades = [
-        createMockTrade({ asset_id: 'token-1', size: '10', price: '0.5', side: Side.BUY }),
-        createMockTrade({ asset_id: 'token-1', size: '20', price: '0.6', side: Side.BUY }),
-        createMockTrade({ asset_id: 'token-1', size: '30', price: '0.4', side: Side.BUY }),
+        createMockTrade({ asset: 'token-1', size: '10', price: '0.5', side: Side.BUY }),
+        createMockTrade({ asset: 'token-1', size: '20', price: '0.6', side: Side.BUY }),
+        createMockTrade({ asset: 'token-1', size: '30', price: '0.4', side: Side.BUY }),
       ];
 
       for (const trade of trades) {
@@ -575,15 +574,15 @@ describe('PositionManager', () => {
 
     it('should update lastUpdated timestamp correctly', () => {
       const timestamp1 = Date.now();
-      const trade1 = createMockTrade({ asset_id: 'token-1', timestamp: timestamp1 });
+      const trade1 = createMockTrade({ asset: 'token-1', timestamp: timestamp1 });
       positionManager.updatePosition(trade1, true);
 
       const timestamp2 = timestamp1 + 10000;
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '10',
-        timestamp: timestamp2
+        timestamp: timestamp2,
       });
       positionManager.updatePosition(trade2, true);
 
@@ -596,7 +595,7 @@ describe('PositionManager', () => {
     it('should handle complete position lifecycle', () => {
       // Open position
       const trade1 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '100',
         price: '0.5',
@@ -606,7 +605,7 @@ describe('PositionManager', () => {
 
       // Add to position
       const trade2 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.BUY,
         size: '50',
         price: '0.6',
@@ -616,7 +615,7 @@ describe('PositionManager', () => {
 
       // Reduce position
       const trade3 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '100',
         price: '0.7',
@@ -626,7 +625,7 @@ describe('PositionManager', () => {
 
       // Close position
       const trade4 = createMockTrade({
-        asset_id: 'token-1',
+        asset: 'token-1',
         side: Side.SELL,
         size: '50',
         price: '0.8',
@@ -639,7 +638,7 @@ describe('PositionManager', () => {
       const tokens = ['token-1', 'token-2', 'token-3'];
 
       for (const tokenId of tokens) {
-        const trade = createMockTrade({ asset_id: tokenId });
+        const trade = createMockTrade({ asset: tokenId });
         positionManager.updatePosition(trade, true);
       }
 
@@ -647,7 +646,7 @@ describe('PositionManager', () => {
 
       // Close one position
       const closeTrade = createMockTrade({
-        asset_id: 'token-2',
+        asset: 'token-2',
         side: Side.SELL,
         size: '100',
       });

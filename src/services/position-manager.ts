@@ -44,27 +44,27 @@ export class PositionManager {
     const positionMap = isUserTrade ? this.userPositions : this.targetPositions;
 
     // CRITICAL: Validate required fields
-    if (!trade.asset_id || !trade.market) {
+    if (!trade.asset || !trade.conditionId) {
       logger.warn(
         {
-          tradeId: trade.id,
-          hasAssetId: !!trade.asset_id,
-          hasMarket: !!trade.market,
+          tradeHash: trade.transactionHash,
+          hasAsset: !!trade.asset,
+          hasConditionId: !!trade.conditionId,
         },
-        'Trade missing required fields (asset_id or market), skipping position update'
+        'Trade missing required fields (asset or conditionId), skipping position update'
       );
       return;
     }
 
-    const positionKey = trade.asset_id;
+    const positionKey = trade.asset;
 
     const existingPosition = positionMap.get(positionKey);
 
     if (!existingPosition) {
       // New position
       const newPosition: Position = {
-        tokenId: trade.asset_id,
-        market: trade.market,
+        tokenId: trade.asset,
+        market: trade.conditionId,
         outcome: trade.outcome || 'Unknown',
         size: Number(trade.size),
         avgPrice: Number(trade.price),

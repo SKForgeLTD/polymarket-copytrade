@@ -3,11 +3,11 @@
  * Tests circuit breaker state machine, risk validation, and time-dependent behavior
  */
 
-import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
-import { RiskManager } from './risk-manager.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Config } from '../config/index.js';
 import { createMockConfig, createMockPosition } from '../test-utils/fixtures.js';
 import { Side } from '../types/polymarket.js';
-import type { Config } from '../config/index.js';
+import { RiskManager } from './risk-manager.js';
 
 describe('RiskManager', () => {
   let riskManager: RiskManager;
@@ -168,14 +168,7 @@ describe('RiskManager', () => {
     });
 
     it('should accept price at lower boundary (0.01)', async () => {
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        200,
-        0.01,
-        100,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 200, 0.01, 100, []);
 
       expect(result.passed).toBe(true);
     });
@@ -352,14 +345,7 @@ describe('RiskManager', () => {
       riskManager.recordFailure();
       riskManager.recordFailure();
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(false);
       expect(result.reason).toContain('Circuit breaker active');
@@ -374,14 +360,7 @@ describe('RiskManager', () => {
       riskManager.recordFailure();
       riskManager.recordFailure();
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(false);
       expect(result.reason).toContain('Circuit breaker active');
@@ -402,14 +381,7 @@ describe('RiskManager', () => {
       // Advance time past cooldown (5 minutes = 300000 ms)
       vi.spyOn(Date, 'now').mockReturnValue(mockNow + 300001);
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(true);
       expect(riskManager.getCircuitBreakerStatus().isTripped).toBe(false);
@@ -427,14 +399,7 @@ describe('RiskManager', () => {
       // Advance time but not enough (4 minutes instead of 5)
       vi.spyOn(Date, 'now').mockReturnValue(mockNow + 240000);
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(false);
       expect(riskManager.getCircuitBreakerStatus().isTripped).toBe(true);
@@ -467,14 +432,7 @@ describe('RiskManager', () => {
       // Immediate second trade should fail (within cooldown)
       vi.spyOn(Date, 'now').mockReturnValue(mockNow + 500); // 500ms later
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(false);
       expect(result.reason).toContain('Trade cooldown active');
@@ -490,28 +448,14 @@ describe('RiskManager', () => {
       // Trade after cooldown should succeed
       vi.spyOn(Date, 'now').mockReturnValue(mockNow + 1001); // 1001ms later
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(true);
     });
 
     it('should allow first trade without cooldown', async () => {
       // No recordSuccess called yet, so lastTradeTime is 0
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(true);
     });
@@ -524,14 +468,7 @@ describe('RiskManager', () => {
 
       vi.spyOn(Date, 'now').mockReturnValue(mockNow + 300); // 300ms later
 
-      const result = await riskManager.validateTrade(
-        'token-123',
-        Side.BUY,
-        100,
-        0.5,
-        200,
-        []
-      );
+      const result = await riskManager.validateTrade('token-123', Side.BUY, 100, 0.5, 200, []);
 
       expect(result.passed).toBe(false);
       expect(result.reason).toContain('Wait');

@@ -5,9 +5,9 @@
 
 import { Side } from '@polymarket/clob-client';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { PositionCalculator } from './position-calculator.js';
-import { createMockConfig, createMockPosition } from '../test-utils/fixtures.js';
 import type { Config } from '../config/index.js';
+import { createMockConfig, createMockPosition } from '../test-utils/fixtures.js';
+import { PositionCalculator } from './position-calculator.js';
 
 describe('PositionCalculator', () => {
   let calculator: PositionCalculator;
@@ -291,10 +291,7 @@ describe('PositionCalculator', () => {
 
   describe('calculatePortfolioExposure', () => {
     it('should calculate correct exposure with positions and balance', () => {
-      const positions = [
-        createMockPosition({ value: 50 }),
-        createMockPosition({ value: 30 }),
-      ];
+      const positions = [createMockPosition({ value: 50 }), createMockPosition({ value: 30 })];
       const balance = 120;
 
       const exposure = calculator.calculatePortfolioExposure(positions, balance);
@@ -607,11 +604,7 @@ describe('PositionCalculator', () => {
       const balance = 50;
 
       // Try to add another large position
-      const wouldExceed = calculator.wouldExceedExposureLimit(
-        existingPositions,
-        balance,
-        50
-      );
+      const wouldExceed = calculator.wouldExceedExposureLimit(existingPositions, balance, 50);
 
       // currentValue = 100, newValue = 150
       // totalPortfolio = 50 + 100 = 150

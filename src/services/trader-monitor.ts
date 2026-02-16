@@ -147,13 +147,13 @@ export class TraderMonitor extends EventEmitter {
     const now = Date.now();
 
     // Validate required fields early
-    if (!trade.market || !trade.asset_id || !trade.maker_address) {
+    if (!trade.conditionId || !trade.asset || !trade.proxyWallet) {
       logger.warn(
         {
-          tradeId: trade.id,
-          hasMarket: !!trade.market,
-          hasAssetId: !!trade.asset_id,
-          hasMaker: !!trade.maker_address,
+          tradeHash: trade.transactionHash,
+          hasConditionId: !!trade.conditionId,
+          hasAsset: !!trade.asset,
+          hasProxyWallet: !!trade.proxyWallet,
         },
         'Trade missing required fields, ignoring'
       );
@@ -163,11 +163,12 @@ export class TraderMonitor extends EventEmitter {
     const tradeValue = Number(trade.size) * Number(trade.price);
 
     // Log ALL incoming trades (before any filtering)
+    const tradeId = trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`;
     logger.info(
       {
-        tradeId: trade.id,
-        maker: `${trade.maker_address.substring(0, 10)}...`,
-        market: trade.market?.substring(0, 30) || 'unknown',
+        tradeHash: tradeId,
+        maker: `${trade.proxyWallet.substring(0, 10)}...`,
+        market: trade.conditionId?.substring(0, 30) || 'unknown',
         side: trade.side,
         size: Number(trade.size).toFixed(2),
         price: Number(trade.price).toFixed(4),
@@ -177,11 +178,11 @@ export class TraderMonitor extends EventEmitter {
     );
 
     // Check if this trade was recently processed (prevent duplicates)
-    const lastSeen = this.recentTrades.get(trade.id);
+    const lastSeen = this.recentTrades.get(tradeId);
     if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
       logger.info(
         {
-          tradeId: trade.id,
+          tradeHash: tradeId,
           timeSinceLastSeen: `${Math.round((now - lastSeen) / 1000)}s`,
         },
         '🔄 Duplicate trade filtered (already seen)'
@@ -190,7 +191,7 @@ export class TraderMonitor extends EventEmitter {
     }
 
     // Mark trade as recently seen
-    this.recentTrades.set(trade.id, now);
+    this.recentTrades.set(tradeId, now);
 
     // Cleanup old entries to prevent unbounded growth
     for (const [id, ts] of this.recentTrades.entries()) {
@@ -205,13 +206,11 @@ export class TraderMonitor extends EventEmitter {
     }
 
     // Filter by maker address (target trader)
-    if (
-      trade.maker_address.toLowerCase() !== this.config.trading.targetTraderAddress.toLowerCase()
-    ) {
+    if (trade.proxyWallet.toLowerCase() !== this.config.trading.targetTraderAddress.toLowerCase()) {
       logger.info(
         {
-          tradeId: trade.id,
-          maker: `${trade.maker_address.substring(0, 10)}...`,
+          tradeHash: tradeId,
+          maker: `${trade.proxyWallet.substring(0, 10)}...`,
           target: `${this.config.trading.targetTraderAddress.substring(0, 10)}...`,
         },
         '❌ Trade from different address (not our target)'
@@ -223,7 +222,7 @@ export class TraderMonitor extends EventEmitter {
     if (tradeValue < this.config.trading.minTradeSizeUsd) {
       logger.info(
         {
-          tradeId: trade.id,
+          tradeHash: tradeId,
           value: `$${tradeValue.toFixed(2)}`,
           minRequired: `$${this.config.trading.minTradeSizeUsd}`,
         },
@@ -233,7 +232,10 @@ export class TraderMonitor extends EventEmitter {
     }
 
     // Use readable market name
-    const marketName = trade.title || trade.slug || `${trade.market.substring(0, 6)}...${trade.market.substring(trade.market.length - 4)}`;
+    const marketName =
+      trade.title ||
+      trade.slug ||
+      `${trade.conditionId.substring(0, 6)}...${trade.conditionId.substring(trade.conditionId.length - 4)}`;
 
     logger.info(
       {

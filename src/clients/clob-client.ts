@@ -53,58 +53,75 @@ export class PolymarketClobClient {
     );
     const wallet = new Wallet(privateKey, provider);
 
-    logger.info(
-      { address: wallet.address, funder: config.wallet.funderAddress },
-      'Deriving API credentials from private key...'
-    );
-
-    // Create temporary client to derive API keys
-    const tempClient = new ClobClient(
-      'https://clob.polymarket.com',
-      137,
-      wallet,
-      undefined,
-      SignatureType.POLY_PROXY, // Standard Polymarket proxy wallet
-      config.wallet.funderAddress
-    );
-
-    // Derive API credentials from private key
+    // Use manual credentials if provided, otherwise auto-derive
     let credentials: ClobApiCredentials;
-    try {
-      const derivedCreds = await tempClient.createOrDeriveApiKey();
 
-      // Validate that credentials were actually created
-      if (!derivedCreds || !derivedCreds.key || !derivedCreds.secret || !derivedCreds.passphrase) {
-        throw new Error(
-          'API credential derivation returned invalid or empty credentials. ' +
-            'This may indicate the wallet is not properly set up on Polymarket.'
-        );
-      }
-
+    if (config.wallet.apiKey && config.wallet.apiSecret && config.wallet.apiPassphrase) {
+      // Use provided credentials
       credentials = {
-        key: derivedCreds.key,
-        secret: derivedCreds.secret,
-        passphrase: derivedCreds.passphrase,
+        key: config.wallet.apiKey,
+        secret: config.wallet.apiSecret,
+        passphrase: config.wallet.apiPassphrase,
       };
 
       logger.info(
         {
           address: wallet.address,
-          apiKeyPrefix: `${derivedCreds.key.substring(0, 8)}...`,
+          apiKeyPrefix: `${config.wallet.apiKey.substring(0, 8)}...`,
         },
-        'API credentials derived successfully'
+        'Using manual API credentials'
       );
-    } catch (error) {
-      logger.error(
-        {
-          address: wallet.address,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Failed to derive API credentials'
+    } else {
+      // Auto-derive credentials from private key
+      logger.info(
+        { address: wallet.address, funder: config.wallet.funderAddress },
+        'Deriving API credentials from private key...'
       );
-      throw new Error(
-        `Failed to derive API credentials: ${error instanceof Error ? error.message : String(error)}`
+
+      const tempClient = new ClobClient(
+        'https://clob.polymarket.com',
+        137,
+        wallet,
+        undefined,
+        SignatureType.POLY_PROXY,
+        config.wallet.funderAddress
       );
+
+      try {
+        const derivedCreds = await tempClient.createOrDeriveApiKey();
+
+        if (!derivedCreds || !derivedCreds.key || !derivedCreds.secret || !derivedCreds.passphrase) {
+          throw new Error(
+            'API credential derivation returned invalid or empty credentials. ' +
+              'This may indicate the wallet is not properly set up on Polymarket.'
+          );
+        }
+
+        credentials = {
+          key: derivedCreds.key,
+          secret: derivedCreds.secret,
+          passphrase: derivedCreds.passphrase,
+        };
+
+        logger.info(
+          {
+            address: wallet.address,
+            apiKeyPrefix: `${derivedCreds.key.substring(0, 8)}...`,
+          },
+          'API credentials derived successfully'
+        );
+      } catch (error) {
+        logger.error(
+          {
+            address: wallet.address,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Failed to derive API credentials'
+        );
+        throw new Error(
+          `Failed to derive API credentials: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
 
     // Initialize ClobClient with wallet, credentials, and funder address
@@ -198,8 +215,22 @@ export class PolymarketClobClient {
         };
 
         // Create and post the order in one call
-        // This returns the orderID directly
+        // This returns the orderID directly (or error object if failed)
         const orderId = await this.client.createAndPostOrder(params, {}, OrderType.GTC);
+
+        // Validate response - CLOB client sometimes returns error objects instead of throwing
+        if (!orderId || typeof orderId !== 'string') {
+          throw new Error(
+            `Invalid order response: ${JSON.stringify(orderId)}`
+          );
+        }
+
+        // Check if response is actually an error object disguised as string
+        if ((orderId as any).error || (orderId as any).status === 400) {
+          throw new Error(
+            `Order creation failed: ${(orderId as any).error || 'Unknown error'} (status: ${(orderId as any).status})`
+          );
+        }
 
         logger.info(
           {

@@ -15,6 +15,10 @@ const configSchema = z.object({
     funderAddress: z
       .string()
       .regex(/^0x[0-9a-fA-F]{40}$/, 'FUNDER_ADDRESS must be a valid Ethereum address'),
+    // Optional manual API credentials (if not provided, auto-derives from private key)
+    apiKey: z.string().optional(),
+    apiSecret: z.string().optional(),
+    apiPassphrase: z.string().optional(),
   }),
 
   // Trading
@@ -68,6 +72,9 @@ export function loadConfig(): Config {
       wallet: {
         privateKey: process.env.PRIVATE_KEY,
         funderAddress: process.env.FUNDER_ADDRESS,
+        apiKey: process.env.POLYMARKET_API_KEY,
+        apiSecret: process.env.POLYMARKET_API_SECRET,
+        apiPassphrase: process.env.POLYMARKET_API_PASSPHRASE,
       },
       trading: {
         targetTraderAddress: process.env.TARGET_TRADER_ADDRESS,

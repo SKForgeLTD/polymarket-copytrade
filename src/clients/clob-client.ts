@@ -422,6 +422,20 @@ export class PolymarketClobClient {
       const bestBid = bids.length > 0 && bids[0] ? Number(bids[0].price) : 0;
       const bestAsk = asks.length > 0 && asks[0] ? Number(asks[0].price) : 0;
 
+      // Debug: Log order book details to help diagnose price issues
+      logger.debug(
+        {
+          tokenId,
+          bestBid: bestBid.toFixed(4),
+          bestAsk: bestAsk.toFixed(4),
+          bidCount: bids.length,
+          askCount: asks.length,
+          topBids: bids.slice(0, 3).map((b: any) => `${b.price}@${b.size}`),
+          topAsks: asks.slice(0, 3).map((a: any) => `${a.price}@${a.size}`),
+        },
+        'Order book fetched'
+      );
+
       return { bid: bestBid, ask: bestAsk };
     } catch (error: any) {
       // Handle 404 as market closed/settled (expected)

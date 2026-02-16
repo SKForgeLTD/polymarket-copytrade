@@ -7,7 +7,7 @@ import { PositionManager } from './services/position-manager.js';
 import { RiskManager } from './services/risk-manager.js';
 import { TradeExecutor } from './services/trade-executor.js';
 import { TraderMonitor } from './services/trader-monitor.js';
-import type { Trade } from './types/polymarket.js';
+import { Side, type Trade } from './types/polymarket.js';
 import { getTradeLogObject } from './utils/format.js';
 import type { TradeHistoryEntry } from './web/types/api.js';
 
@@ -291,6 +291,25 @@ export class Orchestrator {
         'Trade below minimum size threshold, skipping'
       );
       return;
+    }
+
+    // Filter SELL trades if we have no position to exit (early rejection before queuing)
+    if (trade.side === Side.SELL) {
+      const userPosition = this.positionManager.getAllUserPositions().find(
+        (p) => p.market === trade.conditionId && p.tokenId === trade.asset
+      );
+
+      if (!userPosition || userPosition.size <= 0) {
+        logger.debug(
+          {
+            tradeId: trade.transactionHash || `${trade.conditionId}-${trade.timestamp}`,
+            market: trade.conditionId,
+            outcome: trade.outcome,
+          },
+          'SELL trade but no position to exit, skipping'
+        );
+        return;
+      }
     }
 
     // Check queue capacity (bounded queue for production safety)

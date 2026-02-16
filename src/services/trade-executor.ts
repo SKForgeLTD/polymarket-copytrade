@@ -412,85 +412,96 @@ export class TradeExecutor {
       return { copy: true };
     }
 
-    // Target has existing position - check if current price is favorable
-    const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset);
+    // Target has existing position - check current market price before copying
+    const targetTradePrice = Number(targetTrade.price);
 
-    // Only skip if API returned null (true error or 404)
-    if (!currentPrices) {
-      logger.info(
-        { tokenId: targetTrade.asset, market: targetTrade.conditionId },
-        'Market order book unavailable (likely closed/settled) - skipping trade'
-      );
-      return {
-        copy: false,
-        reason: 'Market closed/settled (API returned no order book)',
-      };
-    }
-
-    // Log current market state
+    // Debug: Log what we're about to query
     logger.debug(
       {
         tokenId: targetTrade.asset,
-        bid: currentPrices.bid,
-        ask: currentPrices.ask,
-        targetCost: targetExistingPosition.avgPrice,
+        conditionId: targetTrade.conditionId,
+        outcome: targetTrade.outcome,
+        targetTradePrice: targetTradePrice.toFixed(4),
+        targetTradeSide: targetTrade.side,
       },
-      'Checking current market prices for BUY trade'
+      'Fetching order book for price check'
     );
 
-    // If no ask orders (ask = 0), we can still place a bid order
-    // The market isn't closed - there's just no sellers at this moment
-    const currentPrice =
-      currentPrices.ask > 0 ? currentPrices.ask : targetExistingPosition.avgPrice;
-    const targetCost = targetExistingPosition.avgPrice;
-    const maxAcceptablePrice = targetCost * 1.01; // Allow up to 1% worse price
+    const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset);
 
-    // If no asks available, skip (don't place limit orders)
+    // Market closed or API error
+    if (!currentPrices) {
+      logger.warn(
+        { tokenId: targetTrade.asset, market: targetTrade.conditionId },
+        '⏭️ Skipping - market order book unavailable (likely closed/settled)'
+      );
+      return {
+        copy: false,
+        reason: 'Market closed/settled (no order book)',
+      };
+    }
+
+    // Log detailed price information for debugging
+    logger.info(
+      {
+        tokenId: targetTrade.asset,
+        market: targetTrade.conditionId,
+        targetTradePrice: targetTradePrice.toFixed(4),
+        currentBid: currentPrices.bid.toFixed(4),
+        currentAsk: currentPrices.ask.toFixed(4),
+        targetAvgCost: targetExistingPosition.avgPrice.toFixed(4),
+        targetSize: targetExistingPosition.size.toFixed(2),
+      },
+      'Checking prices before copying BUY trade'
+    );
+
+    // No ask orders available (no sellers)
     if (currentPrices.ask === 0) {
-      logger.info(
+      logger.warn(
         {
           tokenId: targetTrade.asset,
-          targetCost: targetCost.toFixed(4),
           hasBids: currentPrices.bid > 0,
         },
-        '⏭️  Skipping BUY - no ask orders available (no limit orders)'
+        '⏭️ Skipping - no ask orders available (no sellers)'
       );
       return { copy: false, reason: 'No ask orders available' };
     }
 
-    // Copy if we can buy at same price or within 1% of target's average cost
-    if (currentPrice <= maxAcceptablePrice) {
-      const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
+    // Check if current ask price is reasonable compared to target's trade price
+    // Allow up to 5% slippage (target might have gotten better execution)
+    const currentAsk = currentPrices.ask;
+    const maxAcceptablePrice = targetTradePrice * 1.05; // 5% slippage tolerance
+    const priceDeviation = ((currentAsk - targetTradePrice) / targetTradePrice) * 100;
+
+    if (currentAsk <= maxAcceptablePrice) {
       logger.info(
         {
           tokenId: targetTrade.asset,
-          currentPrice: currentPrice.toFixed(4),
-          targetCost: targetCost.toFixed(4),
+          currentAsk: currentAsk.toFixed(4),
+          targetPrice: targetTradePrice.toFixed(4),
+          maxAcceptable: maxAcceptablePrice.toFixed(4),
           deviation: `${priceDeviation >= 0 ? '+' : ''}${priceDeviation.toFixed(2)}%`,
         },
-        priceDeviation <= 0
-          ? '✅ BUY trade - price favorable (at or below target cost)'
-          : '✅ BUY trade - price acceptable (within 1% tolerance)'
+        '✅ BUY trade - price acceptable (within 5% of target trade price)'
       );
       return { copy: true };
     }
 
-    // Price is more than 1% worse than target's cost - skip
-    const priceDeviation = ((currentPrice - targetCost) / targetCost) * 100;
-    logger.info(
+    // Price moved too much since target's trade
+    logger.warn(
       {
         tokenId: targetTrade.asset,
-        currentPrice: currentPrice.toFixed(4),
-        targetCost: targetCost.toFixed(4),
+        currentAsk: currentAsk.toFixed(4),
+        targetPrice: targetTradePrice.toFixed(4),
         maxAcceptable: maxAcceptablePrice.toFixed(4),
         deviation: `+${priceDeviation.toFixed(2)}%`,
       },
-      '⏭️  Skipping BUY - price exceeds 1% tolerance'
+      '⏭️ Skipping BUY - current ask exceeds 5% slippage tolerance'
     );
 
     return {
       copy: false,
-      reason: `Current price $${currentPrice.toFixed(4)} > target cost $${targetCost.toFixed(4)}`,
+      reason: `Current ask $${currentAsk.toFixed(4)} > target price $${targetTradePrice.toFixed(4)} (+${priceDeviation.toFixed(2)}%)`,
     };
   }
 

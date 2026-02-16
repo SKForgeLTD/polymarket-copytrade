@@ -26,6 +26,10 @@ export class PositionManager {
    */
   async initialize(): Promise<void> {
     try {
+      // Ensure state directory exists upfront (prevents ENOENT during first save)
+      const dir = path.dirname(this.stateFilePath);
+      await fs.mkdir(dir, { recursive: true });
+
       await this.loadState();
       logger.info('Position manager initialized');
     } catch (error) {

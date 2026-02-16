@@ -25,7 +25,7 @@ export class TraderMonitor extends EventEmitter {
   private pollingInterval: NodeJS.Timeout | null = null;
   private lastPollTimestamp = 0; // Track actual poll time for UI
   private readonly POLL_INTERVAL_MS = 5000; // 5 seconds = ~12/min = 720/hour (70% of 1000/hour limit)
-  private readonly POLL_WINDOW_SECONDS = 7; // Fetch trades from last 7 seconds
+  private readonly POLL_WINDOW_SECONDS = 30; // Increased to 30s to account for API indexing lag and active traders
   // Trade deduplication
   private recentTrades = new Set<string>(); // Set of transaction hashes
   private readonly MAX_DEDUP_CACHE_SIZE = 1000; // Limit cache size
@@ -97,8 +97,9 @@ export class TraderMonitor extends EventEmitter {
       this.lastPollTimestamp = Date.now();
 
       // Fetch recent trades (API doesn't support time filtering for user queries)
+      // Increased limit to handle extremely high-frequency traders
       const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
-        limit: 20, // Reduced since we filter client-side
+        limit: 200, // Fetch 200 trades to ensure we catch recent activity even from very active traders
       });
 
       // Log trade ages for debugging
@@ -127,10 +128,26 @@ export class TraderMonitor extends EventEmitter {
       // Filter trades to only those within our polling window (ignore old trades from API)
       const now = Date.now();
       const windowMs = this.POLL_WINDOW_SECONDS * 1000;
+      const cutoffTime = new Date(now - windowMs).toISOString();
+
       const recentTrades = trades.filter(trade => {
         const tradeAge = now - trade.timestamp;
         return tradeAge <= windowMs;
       });
+
+      // Log filtering details for debugging
+      if (trades.length > 0 && recentTrades.length === 0) {
+        logger.warn(
+          {
+            totalTrades: trades.length,
+            recentTrades: 0,
+            windowSeconds: this.POLL_WINDOW_SECONDS,
+            cutoffTime,
+            newestTradeTime: new Date(Math.max(...trades.map(t => t.timestamp))).toISOString(),
+          },
+          'All fetched trades are outside polling window - possible API lag or very active trader'
+        );
+      }
 
       // Process trades in chronological order (oldest first)
       const sortedTrades = recentTrades.sort((a, b) => a.timestamp - b.timestamp);

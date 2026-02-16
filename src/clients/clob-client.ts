@@ -83,7 +83,7 @@ export class PolymarketClobClient {
         137,
         wallet,
         undefined,
-        SignatureType.POLY_PROXY,
+        SignatureType.POLY_GNOSIS_SAFE,
         config.wallet.funderAddress
       );
 
@@ -135,7 +135,7 @@ export class PolymarketClobClient {
       137, // Polygon mainnet
       wallet,
       credentials,
-      SignatureType.POLY_PROXY, // Standard Polymarket proxy wallet
+      SignatureType.POLY_GNOSIS_SAFE, // Gnosis Safe proxy wallet
       config.wallet.funderAddress // funder address for orders
     );
 

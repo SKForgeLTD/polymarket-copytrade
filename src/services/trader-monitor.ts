@@ -23,8 +23,8 @@ export class TraderMonitor extends EventEmitter {
   private dataApiClient: DataApiClient;
   private isMonitoring = false;
   private pollingInterval: NodeJS.Timeout | null = null;
-  private lastPollTimestamp: number;
   private readonly POLL_INTERVAL_MS = 5000; // 5 seconds = ~12/min = 720/hour (70% of 1000/hour limit)
+  private readonly POLL_WINDOW_SECONDS = 7; // Fetch trades from last 7 seconds
   // Trade deduplication
   private recentTrades = new Set<string>(); // Set of transaction hashes
   private readonly MAX_DEDUP_CACHE_SIZE = 1000; // Limit cache size
@@ -33,8 +33,6 @@ export class TraderMonitor extends EventEmitter {
     super();
     this.config = config;
     this.dataApiClient = dataApiClient;
-    // Start polling from 1 minute ago to catch recent trades on first poll
-    this.lastPollTimestamp = Math.floor(Date.now() / 1000) - 60;
   }
 
   /**
@@ -95,17 +93,18 @@ export class TraderMonitor extends EventEmitter {
   private async pollForTrades(): Promise<void> {
     try {
       const currentTimestamp = Math.floor(Date.now() / 1000);
+      const startTimestamp = currentTimestamp - this.POLL_WINDOW_SECONDS;
 
-      // Fetch trades since last poll
+      // Fetch trades from last 7 seconds
       const trades = await this.dataApiClient.getUserTrades(this.config.trading.targetTraderAddress, {
-        startTime: this.lastPollTimestamp,
+        startTime: startTimestamp,
         limit: 100,
       });
 
       logger.debug(
         {
           tradesFound: trades.length,
-          startTime: new Date(this.lastPollTimestamp * 1000).toISOString(),
+          windowSeconds: this.POLL_WINDOW_SECONDS,
         },
         'Poll completed'
       );
@@ -113,12 +112,28 @@ export class TraderMonitor extends EventEmitter {
       // Process trades in chronological order (oldest first)
       const sortedTrades = trades.sort((a, b) => a.timestamp - b.timestamp);
 
+      let newTradesCount = 0;
+      let filteredCount = 0;
+
       for (const trade of sortedTrades) {
-        this.handleTrade(trade);
+        const isNew = this.handleTrade(trade);
+        if (isNew) {
+          newTradesCount++;
+        } else {
+          filteredCount++;
+        }
       }
 
-      // Update last poll timestamp for next poll
-      this.lastPollTimestamp = currentTimestamp;
+      // Log filtered trades summary if any were skipped
+      if (filteredCount > 0) {
+        logger.debug(
+          {
+            filtered: filteredCount,
+            new: newTradesCount,
+          },
+          'Filtered duplicate/old trades'
+        );
+      }
     } catch (error) {
       logger.error(
         {
@@ -132,8 +147,9 @@ export class TraderMonitor extends EventEmitter {
 
   /**
    * Handle detected trade from polling
+   * Returns true if trade is new, false if filtered/duplicate
    */
-  private handleTrade(trade: Trade): void {
+  private handleTrade(trade: Trade): boolean {
     // Validate required fields
     if (!trade.conditionId || !trade.asset || !trade.proxyWallet || !trade.transactionHash) {
       logger.warn(
@@ -145,12 +161,12 @@ export class TraderMonitor extends EventEmitter {
         },
         'Trade missing required fields, ignoring'
       );
-      return;
+      return false;
     }
 
     // Deduplicate by transaction hash
     if (this.recentTrades.has(trade.transactionHash)) {
-      return; // Already processed
+      return false; // Already processed
     }
 
     // Mark as processed
@@ -176,13 +192,14 @@ export class TraderMonitor extends EventEmitter {
         },
         'Trade below minimum threshold, skipping'
       );
-      return;
+      return false;
     }
 
     logger.info(getTradeLogObject(trade), '✅ Target trade detected');
 
     // Emit trade event
     this.emit('trade', trade);
+    return true;
   }
 
   /**
@@ -192,7 +209,7 @@ export class TraderMonitor extends EventEmitter {
     return {
       isMonitoring: this.isMonitoring,
       pollingActive: !!this.pollingInterval,
-      lastPollTime: new Date(this.lastPollTimestamp * 1000).toISOString(),
+      lastPollTime: new Date().toISOString(),
       targetAddress: this.config.trading.targetTraderAddress,
       pollIntervalSeconds: this.POLL_INTERVAL_MS / 1000,
     };

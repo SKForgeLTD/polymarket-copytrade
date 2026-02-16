@@ -595,10 +595,10 @@ export class Orchestrator {
   }
 
   /**
-   * Start periodic uptime broadcast
+   * Start periodic uptime and status broadcasts
    */
   private startUptimeBroadcast(): void {
-    // Broadcast uptime every 30 seconds
+    // Broadcast uptime and monitoring status every 5 seconds
     this.uptimeInterval = setInterval(() => {
       if (!this.webServer) return;
 
@@ -607,6 +607,7 @@ export class Orchestrator {
       const minutes = Math.floor((uptimeSeconds % 3600) / 60);
       const seconds = uptimeSeconds % 60;
 
+      // Broadcast uptime
       this.webServer.getSSEManager().broadcast({
         type: 'uptime',
         timestamp: Date.now(),
@@ -615,7 +616,17 @@ export class Orchestrator {
           uptimeFormatted: `${hours}h ${minutes}m ${seconds}s`,
         },
       });
-    }, 30000); // Every 30 seconds
+
+      // Broadcast monitoring status for live countdown
+      const monitoringStatus = this.traderMonitor.getStatus();
+      this.webServer.getSSEManager().broadcast({
+        type: 'status_update',
+        timestamp: Date.now(),
+        data: {
+          monitoring: monitoringStatus,
+        },
+      });
+    }, 5000); // Every 5 seconds (matches poll interval)
   }
 
   /**

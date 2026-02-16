@@ -235,9 +235,12 @@ function connectSSE() {
 
   eventSource.addEventListener('status_update', (event) => {
     const data = JSON.parse(event.data);
-    state.status = data;
-    state.lastUpdate = Date.now();
-    renderApp();
+    // Merge monitoring status into existing status
+    if (state.status && data.monitoring) {
+      state.status.monitoring = data.monitoring;
+      state.lastUpdate = Date.now();
+      renderApp();
+    }
   });
 
   eventSource.addEventListener('trade_detected', (event) => {

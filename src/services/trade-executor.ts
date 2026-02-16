@@ -412,97 +412,16 @@ export class TradeExecutor {
       return { copy: true };
     }
 
-    // Target has existing position - check current market price before copying
-    const targetTradePrice = Number(targetTrade.price);
-
-    // Debug: Log what we're about to query
-    logger.debug(
-      {
-        tokenId: targetTrade.asset,
-        conditionId: targetTrade.conditionId,
-        outcome: targetTrade.outcome,
-        targetTradePrice: targetTradePrice.toFixed(4),
-        targetTradeSide: targetTrade.side,
-      },
-      'Fetching order book for price check'
-    );
-
-    const currentPrices = await this.clobClient.getBestPrices(targetTrade.asset);
-
-    // Market closed or API error
-    if (!currentPrices) {
-      logger.warn(
-        { tokenId: targetTrade.asset, market: targetTrade.conditionId },
-        '⏭️ Skipping - market order book unavailable (likely closed/settled)'
-      );
-      return {
-        copy: false,
-        reason: 'Market closed/settled (no order book)',
-      };
-    }
-
-    // Log detailed price information for debugging
+    // Target is adding to existing position - copy it
     logger.info(
       {
-        tokenId: targetTrade.asset,
-        market: targetTrade.conditionId,
-        targetTradePrice: targetTradePrice.toFixed(4),
-        currentBid: currentPrices.bid.toFixed(4),
-        currentAsk: currentPrices.ask.toFixed(4),
-        targetAvgCost: targetExistingPosition.avgPrice.toFixed(4),
+        outcome: targetTrade.outcome,
+        targetPrice: Number(targetTrade.price).toFixed(4),
         targetSize: targetExistingPosition.size.toFixed(2),
       },
-      'Checking prices before copying BUY trade'
+      '✅ BUY trade - target adding to position, copying'
     );
-
-    // No ask orders available (no sellers)
-    if (currentPrices.ask === 0) {
-      logger.warn(
-        {
-          tokenId: targetTrade.asset,
-          hasBids: currentPrices.bid > 0,
-        },
-        '⏭️ Skipping - no ask orders available (no sellers)'
-      );
-      return { copy: false, reason: 'No ask orders available' };
-    }
-
-    // Check if current ask price is reasonable compared to target's trade price
-    // Allow up to 5% slippage (target might have gotten better execution)
-    const currentAsk = currentPrices.ask;
-    const maxAcceptablePrice = targetTradePrice * 1.05; // 5% slippage tolerance
-    const priceDeviation = ((currentAsk - targetTradePrice) / targetTradePrice) * 100;
-
-    if (currentAsk <= maxAcceptablePrice) {
-      logger.info(
-        {
-          tokenId: targetTrade.asset,
-          currentAsk: currentAsk.toFixed(4),
-          targetPrice: targetTradePrice.toFixed(4),
-          maxAcceptable: maxAcceptablePrice.toFixed(4),
-          deviation: `${priceDeviation >= 0 ? '+' : ''}${priceDeviation.toFixed(2)}%`,
-        },
-        '✅ BUY trade - price acceptable (within 5% of target trade price)'
-      );
-      return { copy: true };
-    }
-
-    // Price moved too much since target's trade
-    logger.warn(
-      {
-        tokenId: targetTrade.asset,
-        currentAsk: currentAsk.toFixed(4),
-        targetPrice: targetTradePrice.toFixed(4),
-        maxAcceptable: maxAcceptablePrice.toFixed(4),
-        deviation: `+${priceDeviation.toFixed(2)}%`,
-      },
-      '⏭️ Skipping BUY - current ask exceeds 5% slippage tolerance'
-    );
-
-    return {
-      copy: false,
-      reason: `Current ask $${currentAsk.toFixed(4)} > target price $${targetTradePrice.toFixed(4)} (+${priceDeviation.toFixed(2)}%)`,
-    };
+    return { copy: true };
   }
 
   /**

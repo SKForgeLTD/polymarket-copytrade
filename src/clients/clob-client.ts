@@ -29,7 +29,7 @@ export class PolymarketClobClient {
 
   // Rate limiting for Polymarket API calls (with proper queuing)
   private lastApiCallPromise: Promise<void> = Promise.resolve();
-  private readonly API_CALL_COOLDOWN_MS = 1000; // 1 second between calls
+  private readonly API_CALL_COOLDOWN_MS = 500; // 500ms between calls
 
   private constructor(client: ClobClient, wallet: Wallet, funderAddress: string) {
     this.client = client;

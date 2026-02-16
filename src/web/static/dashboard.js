@@ -26,7 +26,7 @@ let audioContext = null;
  * Sound Manager - Classic OS notification sounds (macOS/Windows XP style)
  */
 const SoundManager = {
-  volume: 0.2, // 20% volume
+  volume: 0.1, // 10% volume
 
   /**
    * Initialize audio context (requires user interaction)
@@ -77,11 +77,11 @@ const SoundManager = {
   },
 
   /**
-   * Target detected - Glass (like macOS "Glass")
-   * High gentle ding
+   * Target detected - Gentle notification
+   * Lower frequency, less piercing
    */
   targetDetected() {
-    this.playNote(1318.51, 0.3); // E6 - clear, high ping
+    this.playNote(523.25, 0.3); // C5 - clear, mid-range ping
   },
 
   /**

@@ -11,6 +11,10 @@ export class DataApiClient {
   private client: AxiosInstance;
   private baseUrl = 'https://data-api.polymarket.com';
 
+  // Rate limiting for Data API calls (with proper queuing)
+  private lastApiCallPromise: Promise<void> = Promise.resolve();
+  private readonly API_CALL_COOLDOWN_MS = 1000; // 1 second between calls
+
   constructor() {
     this.client = axios.create({
       baseURL: this.baseUrl,
@@ -40,6 +44,25 @@ export class DataApiClient {
   }
 
   /**
+   * Ensure rate limit between API calls (1 second cooldown)
+   * Properly queues concurrent calls to prevent race conditions
+   */
+  private async ensureRateLimit(): Promise<void> {
+    // Chain this call after the previous one
+    const currentPromise = this.lastApiCallPromise.then(async () => {
+      // Wait for cooldown period
+      await new Promise(resolve => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
+      logger.debug({ cooldownMs: this.API_CALL_COOLDOWN_MS }, 'Rate limit cooldown completed');
+    });
+
+    // Update the chain for the next call
+    this.lastApiCallPromise = currentPromise;
+
+    // Wait for our turn
+    await currentPromise;
+  }
+
+  /**
    * Get trades for a specific user
    * API returns trades with fields: proxyWallet, side, asset, conditionId, size (number), price (number), timestamp
    */
@@ -53,6 +76,9 @@ export class DataApiClient {
     } = {}
   ): Promise<Trade[]> {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const params = new URLSearchParams({
         user: userAddress.toLowerCase(),
         limit: String(options.limit || 100),
@@ -125,6 +151,9 @@ export class DataApiClient {
     } = {}
   ): Promise<Trade[]> {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const params = new URLSearchParams({
         market: conditionId,
         limit: String(options.limit || 100),
@@ -159,6 +188,9 @@ export class DataApiClient {
    */
   async getMarket(conditionId: string) {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const response = await this.client.get(`/markets/${conditionId}`);
       return response.data;
     } catch (error) {

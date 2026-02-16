@@ -75,9 +75,8 @@ export class TradeExecutor {
         return result;
       }
 
-      // Get current balance
+      // Get current balance (cached in ClobClient)
       const balance = await this.clobClient.getBalance();
-      logger.info({ balance }, 'Retrieved current balance');
 
       // Get best prices for the market
       const prices = await this.clobClient.getBestPrices(targetTrade.asset);

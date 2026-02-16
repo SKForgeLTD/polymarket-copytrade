@@ -20,8 +20,9 @@ export function createLogger() {
       options: {
         colorize: true,
         translateTime: 'HH:MM:ss.l',
-        ignore: 'pid,hostname',
-        singleLine: false,
+        ignore: 'pid,hostname,env',
+        singleLine: true,
+        messageFormat: '{levelLabel} [{module}] {msg}',
       },
     };
   }

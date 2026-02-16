@@ -22,6 +22,15 @@ export class PolymarketClobClient {
   private wallet: Wallet;
   private funderAddress: string;
 
+  // Balance caching to avoid hammering Polygon RPC
+  private balanceCache: number | null = null;
+  private balanceCacheTimestamp = 0;
+  private readonly BALANCE_CACHE_TTL_MS = 60000; // 60 seconds
+
+  // Rate limiting for Polymarket API calls (with proper queuing)
+  private lastApiCallPromise: Promise<void> = Promise.resolve();
+  private readonly API_CALL_COOLDOWN_MS = 1000; // 1 second between calls
+
   private constructor(client: ClobClient, wallet: Wallet, funderAddress: string) {
     this.client = client;
     this.wallet = wallet;
@@ -141,6 +150,25 @@ export class PolymarketClobClient {
   }
 
   /**
+   * Ensure rate limit between API calls (1 second cooldown)
+   * Properly queues concurrent calls to prevent race conditions
+   */
+  private async ensureRateLimit(): Promise<void> {
+    // Chain this call after the previous one
+    const currentPromise = this.lastApiCallPromise.then(async () => {
+      // Wait for cooldown period
+      await new Promise(resolve => setTimeout(resolve, this.API_CALL_COOLDOWN_MS));
+      logger.debug({ cooldownMs: this.API_CALL_COOLDOWN_MS }, 'Rate limit cooldown completed');
+    });
+
+    // Update the chain for the next call
+    this.lastApiCallPromise = currentPromise;
+
+    // Wait for our turn
+    await currentPromise;
+  }
+
+  /**
    * Create a market order
    */
   async createOrder(order: OrderRequest, maxRetries = 3): Promise<OrderResponse> {
@@ -159,6 +187,9 @@ export class PolymarketClobClient {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        // Rate limit before API call
+        await this.ensureRateLimit();
+
         const params: ClobOrderParams = {
           tokenID,
           price,
@@ -216,6 +247,9 @@ export class PolymarketClobClient {
     logger.info({ orderId }, 'Cancelling order');
 
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const params: ClobCancelParams = { orderID: orderId };
       await this.client.cancelOrder(params);
       logger.info({ orderId }, 'Order cancelled successfully');
@@ -236,6 +270,9 @@ export class PolymarketClobClient {
    */
   async getOpenOrders(): Promise<OpenOrder[]> {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const orders = await this.client.getOpenOrders();
       return orders;
     } catch (error) {
@@ -254,6 +291,9 @@ export class PolymarketClobClient {
    */
   async getOrder(orderId: string): Promise<OpenOrder> {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const order = await this.client.getOrder(orderId);
       return order;
     } catch (error) {
@@ -272,10 +312,28 @@ export class PolymarketClobClient {
    * Get user's USDC balance on Polymarket
    *
    * Queries USDC balance directly from Polygon for funder address (proxy wallet)
+   * Cached for 60 seconds to avoid rate limiting on Polygon RPC
    */
   async getBalance(): Promise<number> {
     try {
-      // Query USDC balance directly from Polygon for funder address
+      // Check cache validity
+      const now = Date.now();
+      const cacheAge = now - this.balanceCacheTimestamp;
+      const isCacheValid = this.balanceCache !== null && cacheAge < this.BALANCE_CACHE_TTL_MS;
+
+      if (isCacheValid) {
+        logger.debug(
+          {
+            balance: this.balanceCache,
+            cacheAgeMs: cacheAge,
+            ttlMs: this.BALANCE_CACHE_TTL_MS,
+          },
+          'Using cached balance'
+        );
+        return this.balanceCache as number;
+      }
+
+      // Cache miss or expired - fetch from blockchain
       const provider = this.wallet.provider;
       if (!provider) {
         throw new Error('Wallet provider not available');
@@ -285,13 +343,16 @@ export class PolymarketClobClient {
       const funderBalanceRaw = await usdcContract.balanceOf(this.funderAddress);
       const funderBalance = Number(funderBalanceRaw.toString()) / 10 ** USDC_DECIMALS;
 
-      logger.info(
+      // Update cache
+      this.balanceCache = funderBalance;
+      this.balanceCacheTimestamp = now;
+
+      logger.debug(
         {
-          funderAddress: this.funderAddress,
-          funderBalance,
-          balanceRaw: funderBalanceRaw.toString(),
+          balance: funderBalance,
+          cacheTTLSeconds: this.BALANCE_CACHE_TTL_MS / 1000,
         },
-        'Retrieved balance from Polygon blockchain'
+        'Balance fetched from RPC (now cached)'
       );
 
       return funderBalance;
@@ -313,6 +374,9 @@ export class PolymarketClobClient {
    */
   async getBestPrices(tokenId: string): Promise<{ bid: number; ask: number } | null> {
     try {
+      // Rate limit before API call
+      await this.ensureRateLimit();
+
       const orderBook = await this.client.getOrderBook(tokenId);
 
       // Validate orderBook structure (can be malformed during geoblocking or API errors)

@@ -56,9 +56,6 @@ async function main() {
     } else if (command === 'status') {
       await cli.status();
       process.exit(0);
-    } else if (command === 'sync') {
-      await cli.sync();
-      process.exit(0);
     } else if (command === 'help' || command === '--help' || command === '-h') {
       cli.help();
       process.exit(0);

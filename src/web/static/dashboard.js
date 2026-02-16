@@ -12,6 +12,8 @@ let state = {
   loading: true,
   connected: false,
   lastUpdate: null,
+  websocketConnected: false,
+  uptime: null,
 };
 
 // EventSource for real-time updates
@@ -133,6 +135,19 @@ function connectSSE() {
     const data = JSON.parse(event.data);
     console.log('Circuit breaker event:', data);
     fetchStatus(); // Refresh full status
+  });
+
+  eventSource.addEventListener('connection_status', (event) => {
+    const data = JSON.parse(event.data);
+    console.log('WebSocket connection status:', data.connected);
+    state.websocketConnected = data.connected;
+    renderApp();
+  });
+
+  eventSource.addEventListener('uptime', (event) => {
+    const data = JSON.parse(event.data);
+    state.uptime = data.uptimeFormatted;
+    renderApp();
   });
 
   eventSource.onerror = (error) => {
@@ -406,12 +421,9 @@ function renderMonitoringCard() {
           </span>
         </div>
         <div class="metric-row">
-          <span class="metric-label">Polling</span>
-          <span class="metric-value">
-            ${monitoring.pollingActive
-              ? html`<span class="badge badge-success">ON</span>`
-              : html`<span class="badge badge-info">OFF</span>`
-            }
+          <span class="metric-label">Uptime</span>
+          <span class="metric-value value-dim" style="font-size: 11px;">
+            ${state.uptime || 'calculating...'}
           </span>
         </div>
         <div class="metric-row">

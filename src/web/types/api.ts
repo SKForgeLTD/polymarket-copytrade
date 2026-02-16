@@ -42,7 +42,6 @@ export interface BotStatusResponse {
   monitoring: {
     isActive: boolean;
     websocketConnected: boolean;
-    pollingActive: boolean;
     targetAddress: string;
   };
   performance: {
@@ -103,7 +102,9 @@ export type SSEEventType =
   | 'trade_detected'
   | 'trade_executed'
   | 'trade_failed'
-  | 'circuit_breaker';
+  | 'circuit_breaker'
+  | 'connection_status'
+  | 'uptime';
 
 /**
  * SSE event data

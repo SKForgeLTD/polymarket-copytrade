@@ -1,5 +1,4 @@
 import { EventEmitter } from 'node:events';
-import type { DataApiClient } from '../clients/data-api.js';
 import type { PolymarketRTDSClient } from '../clients/rtds-client.js';
 import type { Config } from '../config/index.js';
 import { createChildLogger } from '../logger/index.js';
@@ -8,32 +7,39 @@ import type { Trade } from '../types/polymarket.js';
 const logger = createChildLogger({ module: 'TraderMonitor' });
 
 /**
+ * Connection status for WebSocket
+ */
+export interface ConnectionStatus {
+  connected: boolean;
+  timestamp: number;
+  reason?: string;
+}
+
+/**
  * Events emitted by TraderMonitor
  */
 interface TraderMonitorEvents {
   trade: (trade: Trade) => void;
   error: (error: Error) => void;
+  connectionStatus: (status: ConnectionStatus) => void;
 }
 
 /**
- * Monitor target trader for new trades via WebSocket and polling fallback
+ * Monitor target trader for new trades via WebSocket only
  */
 export class TraderMonitor extends EventEmitter {
   private config: Config;
   private rtdsClient: PolymarketRTDSClient;
-  private dataApiClient: DataApiClient;
   private isMonitoring = false;
-  private pollingInterval: NodeJS.Timeout | null = null;
   private lastSeenTimestamp = Date.now();
-  // Source-aware deduplication to prevent WebSocket + Polling from emitting same trade
+  // Trade deduplication (WebSocket may emit duplicates)
   private recentTrades = new Map<string, number>(); // tradeId → timestamp
   private readonly DEDUP_WINDOW_MS = 60000; // 1 minute
 
-  constructor(config: Config, rtdsClient: PolymarketRTDSClient, dataApiClient: DataApiClient) {
+  constructor(config: Config, rtdsClient: PolymarketRTDSClient) {
     super();
     this.config = config;
     this.rtdsClient = rtdsClient;
-    this.dataApiClient = dataApiClient;
   }
 
   /**
@@ -50,14 +56,11 @@ export class TraderMonitor extends EventEmitter {
       {
         targetAddress: this.config.trading.targetTraderAddress,
       },
-      'Starting trader monitoring'
+      'Starting WebSocket monitoring'
     );
 
     // Set up WebSocket monitoring
     await this.setupWebSocketMonitoring();
-
-    // Start polling backup (runs alongside WebSocket for redundancy)
-    this.startPolling();
   }
 
   /**
@@ -69,16 +72,10 @@ export class TraderMonitor extends EventEmitter {
     }
 
     this.isMonitoring = false;
-    logger.info('Stopping trader monitoring');
+    logger.info('Stopping WebSocket monitoring');
 
     // Disconnect WebSocket
     this.rtdsClient.disconnect();
-
-    // Stop polling
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-    }
   }
 
   /**
@@ -87,16 +84,25 @@ export class TraderMonitor extends EventEmitter {
   private async setupWebSocketMonitoring(): Promise<void> {
     // Handle trade events
     this.rtdsClient.on('trade', (trade) => {
-      this.handleTrade(trade, 'websocket');
+      this.handleTrade(trade);
     });
 
     // Handle connection events
     this.rtdsClient.on('connected', () => {
       logger.info('WebSocket connected');
+      this.emit('connectionStatus', {
+        connected: true,
+        timestamp: Date.now(),
+      });
     });
 
     this.rtdsClient.on('disconnected', () => {
-      logger.warn('WebSocket disconnected, relying on polling fallback');
+      logger.warn('WebSocket disconnected');
+      this.emit('connectionStatus', {
+        connected: false,
+        timestamp: Date.now(),
+        reason: 'disconnected',
+      });
     });
 
     this.rtdsClient.on('error', (error) => {
@@ -107,84 +113,37 @@ export class TraderMonitor extends EventEmitter {
         'WebSocket error'
       );
       this.emit('error', error);
+      this.emit('connectionStatus', {
+        connected: false,
+        timestamp: Date.now(),
+        reason: error.message,
+      });
     });
 
     // Connect to WebSocket
     try {
       await this.rtdsClient.connect();
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(
         {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         },
-        'Failed to connect WebSocket, relying on polling'
+        'Failed to connect WebSocket'
       );
-    }
-  }
-
-  /**
-   * Start polling for new trades
-   */
-  private startPolling(): void {
-    const intervalMs = this.config.monitoring.pollingIntervalSeconds * 1000;
-
-    logger.info(
-      {
-        intervalSeconds: this.config.monitoring.pollingIntervalSeconds,
-      },
-      'Starting polling backup (redundancy alongside WebSocket)'
-    );
-
-    this.pollingInterval = setInterval(async () => {
-      await this.pollForNewTrades();
-    }, intervalMs);
-  }
-
-  /**
-   * Poll for new trades
-   */
-  private async pollForNewTrades(): Promise<void> {
-    try {
-      logger.debug(
-        {
-          targetAddress: `${this.config.trading.targetTraderAddress.substring(0, 10)}...`,
-          lastSeenTimestamp: new Date(this.lastSeenTimestamp).toISOString(),
-        },
-        '🔍 Polling for new trades...'
-      );
-
-      const newTrades = await this.dataApiClient.pollNewTrades(
-        this.config.trading.targetTraderAddress,
-        this.lastSeenTimestamp
-      );
-
-      if (newTrades.length > 0) {
-        logger.info(
-          {
-            count: newTrades.length,
-            source: 'polling',
-          },
-          `📊 Polling found ${newTrades.length} new trade(s)`
-        );
-      }
-
-      for (const trade of newTrades) {
-        this.handleTrade(trade, 'polling');
-      }
-    } catch (error) {
-      logger.error(
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Error polling for trades'
-      );
+      this.emit('connectionStatus', {
+        connected: false,
+        timestamp: Date.now(),
+        reason: errorMessage,
+      });
+      throw error;
     }
   }
 
   /**
    * Handle detected trade
    */
-  private handleTrade(trade: Trade, source: 'websocket' | 'polling'): void {
+  private handleTrade(trade: Trade): void {
     const now = Date.now();
 
     // Validate required fields early
@@ -192,7 +151,6 @@ export class TraderMonitor extends EventEmitter {
       logger.warn(
         {
           tradeId: trade.id,
-          source,
           hasMarket: !!trade.market,
           hasAssetId: !!trade.asset_id,
           hasMaker: !!trade.maker_address,
@@ -207,7 +165,6 @@ export class TraderMonitor extends EventEmitter {
     // Log ALL incoming trades (before any filtering)
     logger.info(
       {
-        source,
         tradeId: trade.id,
         maker: `${trade.maker_address.substring(0, 10)}...`,
         market: trade.market?.substring(0, 30) || 'unknown',
@@ -216,16 +173,15 @@ export class TraderMonitor extends EventEmitter {
         price: Number(trade.price).toFixed(4),
         value: `$${tradeValue.toFixed(2)}`,
       },
-      `📡 Trade received from ${source}`
+      '📡 Trade received from WebSocket'
     );
 
-    // Check if this trade was recently processed (prevent WebSocket + Polling duplicates)
+    // Check if this trade was recently processed (prevent duplicates)
     const lastSeen = this.recentTrades.get(trade.id);
     if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
       logger.info(
         {
           tradeId: trade.id,
-          source,
           timeSinceLastSeen: `${Math.round((now - lastSeen) / 1000)}s`,
         },
         '🔄 Duplicate trade filtered (already seen)'
@@ -278,7 +234,6 @@ export class TraderMonitor extends EventEmitter {
 
     logger.info(
       {
-        source,
         tradeId: trade.id,
         market: trade.market?.substring(0, 40) || 'unknown',
         side: trade.side,
@@ -301,7 +256,6 @@ export class TraderMonitor extends EventEmitter {
     return {
       isMonitoring: this.isMonitoring,
       websocketConnected: this.rtdsClient.isConnected(),
-      pollingActive: this.pollingInterval !== null,
       lastSeenTimestamp: this.lastSeenTimestamp,
       targetAddress: this.config.trading.targetTraderAddress,
     };

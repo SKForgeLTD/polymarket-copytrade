@@ -1,4 +1,4 @@
-import { AssetType, ClobClient, OrderType } from '@polymarket/clob-client';
+import { ClobClient, OrderType } from '@polymarket/clob-client';
 import { SignatureType } from '@polymarket/order-utils';
 import { Contract, providers, Wallet } from 'ethers';
 import type { Config } from '../config/index.js';
@@ -271,38 +271,11 @@ export class PolymarketClobClient {
   /**
    * Get user's USDC balance on Polymarket
    *
-   * First tries CLOB API balance endpoint, falls back to blockchain query
+   * Queries USDC balance directly from Polygon for funder address (proxy wallet)
    */
   async getBalance(): Promise<number> {
     try {
-      // Try 1: Query via getBalanceAllowance (signing wallet)
-      const balanceResponse = await this.client.getBalanceAllowance({
-        asset_type: AssetType.COLLATERAL, // Query USDC balance
-      });
-      const signerBalance = Number(balanceResponse.balance) / 10 ** USDC_DECIMALS;
-
-      logger.info(
-        {
-          method: 'getBalanceAllowance',
-          signerAddress: this.wallet.address,
-          signerBalance,
-          balanceRaw: balanceResponse.balance,
-          allowanceRaw: balanceResponse.allowance,
-        },
-        'Retrieved balance from CLOB API'
-      );
-
-      // If signing wallet has balance, return it
-      if (signerBalance > 0) {
-        return signerBalance;
-      }
-
-      // Try 2: Query USDC balance directly from Polygon for funder address
-      logger.info(
-        { funderAddress: this.funderAddress },
-        'Signer balance is 0, checking funder address on Polygon...'
-      );
-
+      // Query USDC balance directly from Polygon for funder address
       const provider = this.wallet.provider;
       if (!provider) {
         throw new Error('Wallet provider not available');
@@ -314,7 +287,6 @@ export class PolymarketClobClient {
 
       logger.info(
         {
-          method: 'blockchain',
           funderAddress: this.funderAddress,
           funderBalance,
           balanceRaw: funderBalanceRaw.toString(),

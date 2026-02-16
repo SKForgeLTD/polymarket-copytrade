@@ -79,7 +79,6 @@ export class CLI {
       console.log(
         `  WebSocket: ${status.monitoring.websocketConnected ? '✅ Connected' : '⚠️  Disconnected'}`
       );
-      console.log(`  Polling: ${status.monitoring.pollingActive ? '✅ Active' : '❌ Inactive'}`);
       console.log(`  Target Trader: ${status.monitoring.targetAddress}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     } catch (error) {
@@ -91,21 +90,6 @@ export class CLI {
       );
       process.exit(1);
     }
-  }
-
-  /**
-   * Sync positions from blockchain/API
-   */
-  async sync(): Promise<void> {
-    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logger.info('⚠️  Sync command disabled');
-    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logger.info('');
-    logger.info('The bot now focuses purely on live incoming trades.');
-    logger.info('Position reconciliation has been removed for simplicity.');
-    logger.info('');
-    logger.info('To monitor trades, use: pnpm dev start');
-    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   /**
@@ -123,13 +107,11 @@ USAGE:
 COMMANDS:
   start      Start the copy trading bot
   status     Display current status
-  sync       Sync positions from blockchain
   help       Display this help message
 
 EXAMPLES:
   pnpm dev start           # Start the bot
   pnpm dev status          # Check status
-  pnpm dev sync            # Sync positions
   WEB_ENABLED=true pnpm dev start  # Start with web interface
 
 CONFIGURATION:

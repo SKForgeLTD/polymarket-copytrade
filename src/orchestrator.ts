@@ -1,5 +1,4 @@
 import { PolymarketClobClient } from './clients/clob-client.js';
-import { DataApiClient } from './clients/data-api.js';
 import { PolymarketRTDSClient } from './clients/rtds-client.js';
 import type { Config } from './config/index.js';
 import { createChildLogger } from './logger/index.js';
@@ -8,9 +7,9 @@ import { PositionEntryAnalyzer } from './services/position-entry-analyzer.js';
 import { PositionManager } from './services/position-manager.js';
 import { RiskManager } from './services/risk-manager.js';
 import { TradeExecutor } from './services/trade-executor.js';
-import { TraderMonitor } from './services/trader-monitor.js';
+import { TraderMonitor, type ConnectionStatus } from './services/trader-monitor.js';
 import type { Trade } from './types/polymarket.js';
-import { DEFAULT_ENTRY_CONFIG, type SyncAnalysis } from './types/position-entry.js';
+import { DEFAULT_ENTRY_CONFIG } from './types/position-entry.js';
 import type { TradeHistoryEntry } from './web/types/api.js';
 
 const logger = createChildLogger({ module: 'Orchestrator' });
@@ -21,7 +20,6 @@ const logger = createChildLogger({ module: 'Orchestrator' });
 export class Orchestrator {
   private config: Config;
   private clobClient: PolymarketClobClient;
-  private dataApiClient: DataApiClient;
   private positionManager: PositionManager;
   private positionCalculator: PositionCalculator;
   private positionEntryAnalyzer: PositionEntryAnalyzer;
@@ -29,6 +27,8 @@ export class Orchestrator {
   private tradeExecutor: TradeExecutor;
   private traderMonitor: TraderMonitor;
   private isRunning = false;
+  private startTime: number = 0;
+  private uptimeInterval: NodeJS.Timeout | null = null;
   private webServer: InstanceType<typeof import('./web/server.js').WebServer> | undefined = undefined;
 
   // Trade queue for high-frequency processing
@@ -56,7 +56,6 @@ export class Orchestrator {
   private constructor(
     config: Config,
     clobClient: PolymarketClobClient,
-    dataApiClient: DataApiClient,
     positionManager: PositionManager,
     positionCalculator: PositionCalculator,
     positionEntryAnalyzer: PositionEntryAnalyzer,
@@ -66,7 +65,6 @@ export class Orchestrator {
   ) {
     this.config = config;
     this.clobClient = clobClient;
-    this.dataApiClient = dataApiClient;
     this.positionManager = positionManager;
     this.positionCalculator = positionCalculator;
     this.positionEntryAnalyzer = positionEntryAnalyzer;
@@ -82,7 +80,6 @@ export class Orchestrator {
     // Initialize clients (async)
     const clobClient = await PolymarketClobClient.create(config);
     const rtdsClient = new PolymarketRTDSClient(config.trading.targetTraderAddress);
-    const dataApiClient = new DataApiClient();
 
     // Initialize services
     const positionManager = new PositionManager();
@@ -100,13 +97,12 @@ export class Orchestrator {
       positionCalculator
     );
 
-    // Initialize monitor
-    const traderMonitor = new TraderMonitor(config, rtdsClient, dataApiClient);
+    // Initialize monitor (WebSocket-only)
+    const traderMonitor = new TraderMonitor(config, rtdsClient);
 
     return new Orchestrator(
       config,
       clobClient,
-      dataApiClient,
       positionManager,
       positionCalculator,
       positionEntryAnalyzer,
@@ -144,8 +140,7 @@ export class Orchestrator {
       // Display initial status (before sync)
       await this.displayStatus();
 
-      // Skip reconciliation - focus on live trades only
-      logger.info('Ready to monitor live trades (reconciliation disabled)');
+      logger.info('Ready to monitor live trades');
 
       // Set up trade event handler
       this.traderMonitor.on('trade', (trade) => {
@@ -162,6 +157,11 @@ export class Orchestrator {
         );
       });
 
+      // Set up connection status handler
+      this.traderMonitor.on('connectionStatus', (status: ConnectionStatus) => {
+        this.handleConnectionStatusChange(status);
+      });
+
       // Start monitoring
       await this.traderMonitor.start();
 
@@ -173,6 +173,10 @@ export class Orchestrator {
       } else {
         logger.info('Web server disabled in configuration');
       }
+
+      // Start uptime tracking
+      this.startTime = Date.now();
+      this.startUptimeBroadcast();
 
       this.isRunning = true;
       logger.info('Copy trading bot started successfully');
@@ -200,6 +204,12 @@ export class Orchestrator {
     try {
       // Stop monitoring (no new trades)
       this.traderMonitor.stop();
+
+      // Stop uptime broadcast
+      if (this.uptimeInterval) {
+        clearInterval(this.uptimeInterval);
+        this.uptimeInterval = null;
+      }
 
       // Graceful shutdown: drain queue
       if (this.tradeQueue.length > 0 || this.processingTrades > 0) {
@@ -249,152 +259,6 @@ export class Orchestrator {
         },
         'Error stopping orchestrator'
       );
-    }
-  }
-
-  /**
-   * Reconcile positions by fetching recent trades
-   * Shared method used by both startup and sync command
-   */
-  async reconcilePositions(options: {
-    clearFirst?: boolean;
-    includeUser?: boolean;
-    includeTarget?: boolean;
-    analyze?: boolean;
-  }): Promise<{
-    userTrades: Trade[];
-    targetTrades: Trade[];
-    analysis?: SyncAnalysis;
-  }> {
-    const {
-      clearFirst = false,
-      includeUser = false,
-      includeTarget = true,
-      analyze = false,
-    } = options;
-
-    try {
-      logger.info('🔄 Reconciling positions...');
-
-      let userTrades: Trade[] = [];
-      let targetTrades: Trade[] = [];
-
-      // Clear positions if requested (used by sync command)
-      if (clearFirst) {
-        logger.info('🗑️  Clearing existing position cache...');
-        this.positionManager.clearAllPositions();
-      }
-
-      // Fetch and rebuild user positions
-      if (includeUser) {
-        logger.info('📊 Fetching user trade history...');
-        userTrades = await this.dataApiClient.getUserTrades(this.clobClient.getAddress(), {
-          limit: 200,
-        });
-
-        // Filter out trades missing required fields AND trades we've already processed
-        const validTrades = userTrades.filter(t =>
-          t.asset_id && t.market && !this.positionManager.isTradeProcessed(t.id)
-        );
-        const skippedCount = userTrades.length - validTrades.length;
-
-        if (skippedCount > 0) {
-          logger.info({ skipped: skippedCount, total: userTrades.length }, 'Filtered incomplete/processed trades');
-        }
-
-        logger.info('🔨 Rebuilding user positions...');
-        for (const trade of validTrades) {
-          this.positionManager.updatePosition(trade, true);
-          // Mark as processed
-          this.positionManager.markTradeProcessed(trade.id);
-        }
-      }
-
-      // Fetch and rebuild target positions
-      if (includeTarget) {
-        logger.info('📊 Fetching target trader history...');
-        targetTrades = await this.dataApiClient.getUserTrades(
-          this.config.trading.targetTraderAddress,
-          { limit: 200 }
-        );
-
-        logger.info(
-          {
-            tradesFound: targetTrades.length,
-            targetTrader: `${this.config.trading.targetTraderAddress.substring(0, 10)}...`,
-          },
-          `📊 Fetched ${targetTrades.length} recent trades from target trader`
-        );
-
-        if (targetTrades.length > 0) {
-          // Filter out trades missing required fields AND trades we've already processed
-          const validTrades = targetTrades.filter(t =>
-            t.asset_id && t.market && !this.positionManager.isTradeProcessed(t.id)
-          );
-          const skippedCount = targetTrades.length - validTrades.length;
-
-          if (skippedCount > 0) {
-            logger.info({ skipped: skippedCount, total: targetTrades.length }, 'Filtered incomplete/processed trades');
-          }
-
-          logger.info('🔨 Rebuilding target positions...');
-          for (const trade of validTrades) {
-            this.positionManager.updatePosition(trade, false);
-            // Mark as processed so we don't try to copy it again
-            this.positionManager.markTradeProcessed(trade.id);
-          }
-
-          const targetPositions = this.positionManager.getAllTargetPositions();
-
-          logger.info(
-            {
-              totalTrades: targetTrades.length,
-              activePositions: targetPositions.length,
-              markets: targetPositions.map((p) => `${(p.market || 'unknown').substring(0, 30)}...`),
-            },
-            `✅ Reconciled target trader positions: ${targetPositions.length} active`
-          );
-
-          // Log each active position
-          for (const pos of targetPositions) {
-            logger.info(
-              {
-                market: `${(pos.market || 'unknown').substring(0, 40)}...`,
-                outcome: pos.outcome,
-                side: pos.side,
-                size: pos.size.toFixed(2),
-                avgPrice: pos.avgPrice.toFixed(4),
-                value: `$${pos.value.toFixed(2)}`,
-              },
-              '📍 Target position'
-            );
-          }
-        } else {
-          logger.info('No recent trades found for target trader');
-        }
-      }
-
-      // Analyze entry opportunities if requested
-      let analysis: SyncAnalysis | undefined;
-      if (analyze) {
-        logger.info('🔍 Analyzing entry opportunities...');
-        const userPositions = this.positionManager.getAllUserPositions();
-        const targetPositions = this.positionManager.getAllTargetPositions();
-        analysis = await this.positionEntryAnalyzer.analyzeSyncOpportunities(
-          targetPositions,
-          userPositions
-        );
-      }
-
-      return analysis ? { userTrades, targetTrades, analysis } : { userTrades, targetTrades };
-    } catch (error) {
-      logger.warn(
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-        '⚠️ Failed to reconcile positions (non-critical - will sync from live trades)'
-      );
-      return { userTrades: [], targetTrades: [] };
     }
   }
 
@@ -723,6 +587,55 @@ export class Orchestrator {
   }
 
   /**
+   * Handle WebSocket connection status change
+   */
+  private handleConnectionStatusChange(status: ConnectionStatus): void {
+    logger.info(
+      {
+        connected: status.connected,
+        reason: status.reason,
+      },
+      status.connected ? '✅ WebSocket connected' : '❌ WebSocket disconnected'
+    );
+
+    // Broadcast to SSE clients
+    if (this.webServer) {
+      this.webServer.getSSEManager().broadcast({
+        type: 'connection_status',
+        timestamp: status.timestamp,
+        data: {
+          connected: status.connected,
+          reason: status.reason,
+        },
+      });
+    }
+  }
+
+  /**
+   * Start periodic uptime broadcast
+   */
+  private startUptimeBroadcast(): void {
+    // Broadcast uptime every 30 seconds
+    this.uptimeInterval = setInterval(() => {
+      if (!this.webServer) return;
+
+      const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
+      const hours = Math.floor(uptimeSeconds / 3600);
+      const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+      const seconds = uptimeSeconds % 60;
+
+      this.webServer.getSSEManager().broadcast({
+        type: 'uptime',
+        timestamp: Date.now(),
+        data: {
+          uptimeSeconds,
+          uptimeFormatted: `${hours}h ${minutes}m ${seconds}s`,
+        },
+      });
+    }, 30000); // Every 30 seconds
+  }
+
+  /**
    * Get system status
    */
   async getStatus() {
@@ -783,7 +696,6 @@ export class Orchestrator {
       positionManager: this.positionManager,
       positionEntryAnalyzer: this.positionEntryAnalyzer,
       clobClient: this.clobClient,
-      dataApiClient: this.dataApiClient,
       config: this.config,
     };
   }
